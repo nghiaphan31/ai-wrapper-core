@@ -28,6 +28,7 @@ Le noyau (Core) gère l'initialisation, la configuration et, surtout, la traçab
 ### 2.4 Point d'Entrée (`main.py`)
 * **Exécution :** `python3 -m src.main` (Requis pour la résolution des packages).
 * **Rôle :** Orchestre le démarrage et la boucle d'interaction.
+* **Mode interactif :** Le point d’entrée expose désormais une boucle CLI avec des commandes interactives intégrées (ex: `help`, `clear`, `exit`), en plus des commandes de workflow (ex: `gen_code`, `test_ai`).
 
 ## 3. Structure des Données
 Les sessions sont isolées par date. Le Ledger est global au projet.
