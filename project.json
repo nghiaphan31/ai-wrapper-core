@@ -1,0 +1,11 @@
+{
+  "project_name": "AI Wrapper (Bootstrap)",
+  "slug": "ai-wrapper-core",
+  "description": "Implémentation bootstrap de l'interface locale Linux pour interaction IA sécurisée et versionnée.",
+  "version": "0.1.0-init",
+  "created_at": "2026-01-28",
+  "policy": {
+    "model_alias": "gpt-5.2",
+    "strict_mode": true
+  }
+}

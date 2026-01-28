@@ -1,0 +1,30 @@
+# -----------------------------------------------------------
+# STRATÉGIE DE WHITELISTING (Section 5 Spec AI Wrapper)
+# -----------------------------------------------------------
+
+# 1. TOUT IGNORER par défaut
+*
+
+# 2. AUTORISER explicitement les dossiers de documentation et code source
+!*/
+!src/**
+!specs/**
+!impl-docs/**
+!notes/**
+!project.json
+!.gitignore
+
+# 3. EXCLUSION FORMELLE (Redondance de sécurité)
+secrets/
+sessions/
+inputs/
+outputs/
+artifacts/
+ledger/
+manifests/
+
+# 4. FICHIERS SYSTÈME & PYTHON
+__pycache__/
+*.pyc
+.DS_Store
+.env
