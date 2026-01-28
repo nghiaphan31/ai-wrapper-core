@@ -10,24 +10,37 @@ def main():
     GLOBAL_CONSOLE.print(f"--- {project_name} CLI ---")
     GLOBAL_CONSOLE.print("System initialized. Ready for Phase A/B workflow.")
 
-    # 2. Parsing des arguments (Squelette basique pour l'instant)
+    # 2. Parsing des arguments
     parser = argparse.ArgumentParser(description="AI Wrapper Core Interface")
-    parser.add_argument("mode", nargs="?", help="Mode d'interaction (interactive par défaut)", default="interactive")
+    parser.add_argument("mode", nargs="?", help="Mode d'interaction", default="interactive")
     args = parser.parse_args()
 
-    # 3. Simulation d'une boucle interactive simple (Placeholder pour Itération 2)
+    # 3. Boucle interactive
     try:
         if args.mode == "interactive":
-            user_input = GLOBAL_CONSOLE.input("Waiting for command (type 'exit' to quit): ")
-            
-            if user_input.strip().lower() in ["exit", "quit"]:
-                GLOBAL_CONSOLE.print("Shutting down.")
-                return
+            while True: # Boucle continue
+                user_input = GLOBAL_CONSOLE.input("Command (type 'exit' or 'test_ai'): ")
+                
+                if user_input.strip().lower() in ["exit", "quit"]:
+                    GLOBAL_CONSOLE.print("Shutting down.")
+                    break
 
-            # Simulation d'action loguée
-            event_id = GLOBAL_LEDGER.log_event("user", "cli_command", artifacts=[])
-            GLOBAL_CONSOLE.print(f"Command received (Ledger UUID: {event_id})")
-            GLOBAL_CONSOLE.print("No AI backend connected yet (Iteration 2).")
+                elif user_input.strip().lower() == "test_ai":
+                    # Import à la demande pour initialiser le client seulement maintenant
+                    from src.ai_client import AIClient
+                    client = AIClient()
+                    
+                    GLOBAL_CONSOLE.print("Sending 'Hello World' to OpenAI...")
+                    response = client.send_chat_request(
+                        system_prompt="You are a helpful coding assistant.",
+                        user_prompt="Say 'Hello, I am ready to code' and nothing else."
+                    )
+                    GLOBAL_CONSOLE.print(f"AI Response: {response}")
+
+                else:
+                    # Action standard loguée
+                    event_id = GLOBAL_LEDGER.log_event("user", "cli_command", artifacts=[])
+                    GLOBAL_CONSOLE.print(f"Command received (Ledger UUID: {event_id}) - Not implemented yet.")
 
     except KeyboardInterrupt:
         GLOBAL_CONSOLE.print("\nInterrupted by user.")
