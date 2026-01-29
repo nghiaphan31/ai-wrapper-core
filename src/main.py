@@ -83,7 +83,11 @@ def get_input_from_editor(prompt_text: str) -> str:
                 pass
 
 
-def show_diff(target_path: str | Path, new_content: str, title_new: str = "Incoming Change") -> bool:
+def show_diff(
+    target_path: str | Path,
+    new_content: str,
+    title_new: str = "Incoming Change",
+) -> bool:
     """Print a colored unified diff between an existing file and new content.
 
     - Green for added lines (+)
