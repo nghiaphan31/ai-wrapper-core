@@ -27,6 +27,8 @@ Consistency Enforcement:
     2. If you add/rename/remove commands or arguments, you MUST also update the `_print_help` function (or help strings) to reflect these changes immediately.
     Code, Docs, and Help must never be out of sync.
 
+    3. The `traceability_matrix.md` is the project's 'Source of Truth'. Any code generation or documentation update MUST be reflected in this matrix. If a feature is implemented without a Req_ID, you must alert the user to update the Specs first to maintain the Triple-Layer Alignment.
+
 RESPONSE FORMAT:
 {
   "thought_process": "Brief explanation...",

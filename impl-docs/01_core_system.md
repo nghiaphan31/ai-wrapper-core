@@ -30,6 +30,36 @@ Albert inclut désormais une capacité de **reporting agrégé** pour combler le
 * **Sortie console :** un tableau de bord concis (transactions, tokens in/out, coût estimé, chemin du ledger)
 * **Tolérance :** si le ledger est absent ou vide, le rapport affiche des zéros (pas de crash).
 
+### 1.3 Traceability Management
+Albert applique une gouvernance stricte d’alignement entre trois couches :
+
+1) **Specs (Requirements)** — `specs/`
+   * source des exigences (Req_ID)
+   * définit le *quoi/pourquoi* (baseline)
+
+2) **Code (Implementation)** — `src/`
+   * implémente le *comment*
+   * chaque fonctionnalité significative doit pouvoir être reliée à un ou plusieurs Req_ID
+
+3) **Impl-Docs (Living Documentation)** — `impl-docs/`
+   * décrit l’état réel du code (ce qui est effectivement codé)
+   * sert de “carte” opérationnelle : modules, flux, formats de logs, localisation des artefacts
+
+#### 1.3.1 Matrice de Traçabilité = Source de Vérité
+Le fichier **`traceability_matrix.md`** (à la racine du projet) est la **Source of Truth** qui relie explicitement :
+- un **Req_ID** (Specs),
+- les **modules `src/`** concernés,
+- la **documentation `impl-docs/`** correspondante,
+- et un **statut** (Implemented / Partial / Planned).
+
+#### 1.3.2 Règle de maintenance (cycle de vie)
+À chaque changement significatif :
+- si du code est modifié/ajouté dans `src/`, la doc correspondante **doit** être mise à jour dans `impl-docs/` (Definition of Done),
+- et la **ligne correspondante** dans `traceability_matrix.md` **doit** être mise à jour (statut + liens).
+
+#### 1.3.3 Gestion des écarts
+- Si une fonctionnalité est implémentée mais **sans Req_ID**, il faut **mettre à jour les Specs d’abord** (ajout au registre d’exigences) avant de considérer la feature « conforme ». Cela maintient l’alignement *Specs ↔ Code ↔ Impl-Docs*.
+
 
 ## 2. Modules Principaux (`src/`)
 
