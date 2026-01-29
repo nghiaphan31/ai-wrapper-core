@@ -233,6 +233,8 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 
 > Note de cohérence : Les exigences Ad-hoc File Ingestion sont déjà définies en prose sous la forme `REQ-AFI-00X` (Sect. 11.1.1). Dans le registre ci-dessous, elles sont reprises **à l’identique** et mappées à la convention globale via des IDs `REQ_UX_0XX` (sans supprimer les IDs existants).
 
+> Note d’alignement (Audit “Ghost Features”) : L’audit a identifié des "Ghost Features" déjà présentes/attendues côté implémentation mais non formalisées dans la baseline. Elles sont désormais intégrées au registre comme exigences architecturales (sans détailler des aspects visuels comme les couleurs ANSI, ni des alias mineurs de commandes).
+
 | Req_ID | Catégorie | Description de l'Exigence | Priorité |
 |---|---|---|---|
 | REQ_CORE_001 | CORE | Le wrapper DOIT fonctionner sur Linux en mode “local-first” sur une machine unique (NUC ou Calypso). | P0 |
@@ -313,6 +315,12 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_DATA_021 | DATA | Critère d’acceptation : le `.gitignore` DOIT être généré en mode strict (whitelist). | P0 |
 | REQ_DATA_022 | DATA | Critère d’acceptation : toute modification de code DOIT s’accompagner d’une mise à jour de la documentation d’implémentation. | P0 |
 | REQ_UX_016 | UX | Critère d’acceptation : l’utilisateur DOIT pouvoir attacher un ou plusieurs fichiers locaux ; le wrapper DOIT les lire au runtime et injecter leur contenu comme Transient Context distinct du Project Context. | P0 |
+| REQ_UX_017 | UX | **(Ghost Feature GF-002) Interactive Review :** le système DOIT présenter un unified diff et exiger une confirmation explicite **par fichier** avant d’appliquer des changements. | P0 |
+| REQ_DATA_025 | DATA | **(Ghost Feature GF-001) Audit Ledger :** le système DOIT maintenir un ledger transactionnel au niveau opération (`audit_log.jsonl`) pour tracer coûts et statut des opérations, distinct du ledger événementiel. | P0 |
+| REQ_UX_018 | UX | **(Ghost Feature GF-005) Editor Integration :** le système DOIT supporter la saisie multi-ligne via un éditeur externe (ex: Nano) pour des instructions complexes. | P1 |
+| REQ_CORE_025 | CORE | **(Ghost Feature GF-007) Context Scoping :** le système DOIT permettre à l’utilisateur de sélectionner des scopes de contexte (ex: full, code, specs) afin d’optimiser l’usage des tokens. | P1 |
+| REQ_DATA_026 | DATA | **(Ghost Feature GF-003) Auto-Git Workflow :** le système DOIT exécuter automatiquement une séquence atomique git commit/push **APRÈS** validation explicite des changements par l’utilisateur. | P0 |
+| REQ_COST_005 | COST | **(Ghost Feature GF-006) Zero Waste Policy :** le système DOIT interrompre immédiatement le processus si l’instruction utilisateur est vide, afin d’éviter tout appel API et toute dépense de tokens inutile. | P0 |
 
 ### 14.1 Vérification de cohérence (aucune exigence “hors-prose”)
 Toutes les exigences listées ci-dessus sont des reformulations directes (ou reprises exactes) des sections 1 à 13.
@@ -322,6 +330,13 @@ Toutes les exigences listées ci-dessus sont des reformulations directes (ou rep
   * **Injection de fichiers Ad-hoc** : REQ_UX_012 à REQ_UX_015 (+ rappel REQ_UX_016).
   * **Gestion coûts & quotas** : coûts/tokens (REQ_AUDIT_006 à REQ_AUDIT_008, REQ_AUDIT_018) et budgets/caps via policy (REQ_DATA_018).
   * **Isolation secrets & stratégie Git** : REQ_DATA_011, REQ_DATA_014, REQ_DATA_021.
+  * **Ghost Features (Audit) désormais formalisées** :
+    * **Interactive Review (GF-002)** : REQ_UX_017.
+    * **Audit Ledger transactionnel (GF-001)** : REQ_DATA_025.
+    * **Editor Integration (GF-005)** : REQ_UX_018.
+    * **Context Scoping (GF-007)** : REQ_CORE_025.
+    * **Auto-Git Workflow (GF-003)** : REQ_DATA_026.
+    * **Zero Waste Policy (GF-006)** : REQ_COST_005.
 
 Si une exigence future devait être ajoutée au registre sans section détaillée correspondante, elle DOIT être soit :
 1) supprimée du registre, soit
