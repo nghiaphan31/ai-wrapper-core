@@ -260,6 +260,23 @@ def _cmd_status() -> None:
         GLOBAL_CONSOLE.print(out2)
 
 
+def _estimate_cost_usd(usage_stats: dict) -> tuple[float, float, float]:
+    """Estimate USD cost based on token usage.
+
+    Pricing assumptions (as requested):
+      - $3.00 / 1M input tokens
+      - $15.00 / 1M output tokens
+
+    Returns (input_cost, output_cost, total_cost).
+    """
+    prompt_tokens = int((usage_stats or {}).get("prompt_tokens", 0) or 0)
+    completion_tokens = int((usage_stats or {}).get("completion_tokens", 0) or 0)
+
+    in_cost = (prompt_tokens / 1_000_000.0) * 3.00
+    out_cost = (completion_tokens / 1_000_000.0) * 15.00
+    return in_cost, out_cost, (in_cost + out_cost)
+
+
 def _print_help():
     GLOBAL_CONSOLE.print("Available Albert commands:")
     GLOBAL_CONSOLE.print("  implement - Execute an implementation task based on instructions")
@@ -318,6 +335,9 @@ def main():
                     GLOBAL_CONSOLE.print("❌ Action cancelled: Empty instruction.")
                     continue
 
+                # Session/Step identity (for traceability)
+                session_id = datetime.now().strftime("%Y-%m-%d")
+
                 # 2. Construction du contexte (La Mémoire)
                 GLOBAL_CONSOLE.print("Building project context...")
                 project_context = GLOBAL_CONTEXT.build_full_context()
@@ -328,7 +348,7 @@ def main():
                 GLOBAL_CONSOLE.print("Requesting Architect AI (expecting JSON)...")
 
                 # 4. Appel API
-                json_response = client.send_chat_request(
+                json_response, usage_stats = client.send_chat_request(
                     system_prompt=SYSTEM_PROMPT_ARCHITECT,
                     user_prompt=full_user_prompt,
                 )
@@ -367,7 +387,28 @@ def main():
                             subprocess.run(["git", "commit", "-m", commit_message], check=True)
                             subprocess.run(["git", "push"], check=True)
 
+                            # Audit Ledger transaction (after successful push)
+                            GLOBAL_LEDGER.log_transaction(
+                                session_id=session_id,
+                                user_instruction=instruction.strip(),
+                                step_id=step_id,
+                                usage_stats=usage_stats,
+                                status="success",
+                            )
+
+                            # Console: Token Usage + Estimated Cost
+                            pt = int((usage_stats or {}).get("prompt_tokens", 0) or 0)
+                            ct = int((usage_stats or {}).get("completion_tokens", 0) or 0)
+                            tt = int((usage_stats or {}).get("total_tokens", 0) or 0)
+                            in_cost, out_cost, total_cost = _estimate_cost_usd(usage_stats)
+
                             GLOBAL_CONSOLE.print("✅ Success: Changes applied and pushed.")
+                            GLOBAL_CONSOLE.print(
+                                f"Token Usage: prompt={pt}, completion={ct}, total={tt}"
+                            )
+                            GLOBAL_CONSOLE.print(
+                                f"Estimated Cost: input=${in_cost:.6f}, output=${out_cost:.6f}, total=${total_cost:.6f}"
+                            )
                         except subprocess.CalledProcessError as e:
                             GLOBAL_CONSOLE.error(f"❌ Git Error: Command failed. {e}")
                             # Do not print Success.

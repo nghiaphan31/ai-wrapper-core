@@ -13,6 +13,15 @@ Albert n’est pas un simple "chat" : il orchestre le workflow, écrit les artef
 
 Le noyau (Core) gère l'initialisation, la configuration et, surtout, la traçabilité des opérations. Il fournit également une boucle CLI interactive et les points d’entrée de workflow (`test_ai`, `implement`).
 
+### 1.1 Audit Ledger System (Traceabilité + Coûts)
+En plus du ledger événementiel (machine-level), Albert maintient désormais un **Audit Ledger** orienté "transactions" pour assurer une traçabilité directe des opérations et des coûts.
+
+* **Fichier :** `audit_log.jsonl` à la racine du projet (append-only)
+* **Objectif :** lier explicitement une action utilisateur (`implement`) à un `step_id`, un `session_id`, des **token usage stats**, et un **status** (ex: `success`).
+* **Affichage console :** après un `implement` réussi (commit + push), Albert affiche les tokens (prompt/completion/total) et une estimation de coût.
+
+> Le ledger événementiel (`ledger/events.jsonl`) reste la source de vérité pour les événements fins (api_response, file_write, etc.). L'audit ledger (`audit_log.jsonl`) est un résumé transactionnel orienté comptabilité.
+
 ## 2. Modules Principaux (`src/`)
 
 ### 2.1 Configuration (`config.py`)
@@ -22,9 +31,18 @@ Le noyau (Core) gère l'initialisation, la configuration et, surtout, la traçab
 * **Comportement :** Lève une erreur critique si le JSON est malformé ou absent.
 
 ### 2.2 Audit & Ledger (`audit.py`)
-* **Rôle :** Journalisation structurée pour les machines (JSONL).
+* **Rôle :** Journalisation structurée pour les machines (JSONL) + Audit transactionnel.
+
+#### 2.2.1 Ledger événementiel
 * **Fichier de sortie :** `ledger/events.jsonl` (Append-Only).
-* **Champs clés :** `event_uuid`, `actor`, `action_type`, `artifacts_links`.
+* **Champs clés :** `event_uuid`, `actor`, `action_type`, `artifacts_links`, `payload_ref`.
+* **Méthode :** `log_event(...)`.
+
+#### 2.2.2 Audit Ledger (transactions)
+* **Fichier de sortie :** `audit_log.jsonl` (Append-Only).
+* **Méthode :** `log_transaction(session_id, user_instruction, step_id, usage_stats, status)`.
+* **Contenu :** timestamp ISO8601 UTC + tokens + statut.
+
 * **Instance Globale :** `GLOBAL_LEDGER`
 
 ### 2.3 Console & Transcript (`console.py`)
@@ -101,6 +119,9 @@ Si (et seulement si) la revue interactive est validée pour **tous** les fichier
    * `git add .`
    * `git commit -m <message>` (le message est dérivé de l’instruction utilisateur)
    * `git push`
+
+3. Albert écrit une entrée dans `audit_log.jsonl` (transaction `success`) incluant les tokens.
+4. Albert affiche en console : **Token Usage** et **Estimated Cost**.
 
 **Résultat :** une exécution `implement` validée aboutit à une modification **appliquée**, **commitée** et **poussée** automatiquement.
 
