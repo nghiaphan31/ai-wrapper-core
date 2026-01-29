@@ -43,6 +43,7 @@ Le noyau (Core) gère l'initialisation, la configuration et, surtout, la traçab
 Commandes disponibles dans la CLI interactive :
 * `implement` : exécute une tâche d’implémentation via l’IA et écrit les fichiers dans `artifacts/<step_id>/`.
 * `test_ai` : envoie une requête minimale à l’IA (sanity check de connectivité).
+* `status` : affiche un état Git rapide du dépôt (changements en attente + dernier commit).
 * `help` : affiche l’aide.
 * `clear` : efface l’écran via `clear`.
 
@@ -105,7 +106,16 @@ Si (et seulement si) la revue interactive est validée pour **tous** les fichier
 
 > Note importante : l’affichage diff et la validation atomique constituent la barrière de sécurité qui autorise ensuite l’auto-merge/auto-push.
 
-### 2.5 The 'albert' Launcher
+#### 2.4.5 Commande `status` (état Git rapide)
+La commande `status` fournit une vue concise de l'état du dépôt.
+
+**Comportement :**
+1. affiche l’en-tête : `--- Repository Status ---`,
+2. exécute `git status -s` pour lister les changements en attente,
+3. exécute `git log -1 --format="%h - %s (%cr)"` pour afficher le dernier commit,
+4. si Git n’est pas disponible (ex: binaire absent) ou si la commande échoue (ex: dossier non-initialisé), Albert affiche un message d’erreur **amical** (avec détails techniques optionnels).
+
+## 2.5 The 'albert' Launcher
 Le projet fournit un script Bash portable `albert` à la racine du dépôt, conçu comme **launcher universel** pour exécuter la CLI sans dépendre du répertoire courant.
 
 * **Portabilité & “symlink-proof” :** le script résout son propre chemin réel via `realpath`, ce qui garantit un comportement correct même si `albert` est appelé via un lien symbolique.

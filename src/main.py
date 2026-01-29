@@ -199,10 +199,72 @@ def review_and_apply(artifact_folder: str | Path, commit_message: str) -> bool:
     return True
 
 
+def _run_git_command(args: list[str]) -> tuple[int, str, str]:
+    """Run a git command and return (returncode, stdout, stderr).
+
+    This is intentionally tolerant: it never raises, so callers can print friendly errors.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return proc.returncode, (proc.stdout or ""), (proc.stderr or "")
+    except FileNotFoundError:
+        return 127, "", "git executable not found"
+    except Exception as e:
+        return 1, "", str(e)
+
+
+def _cmd_status() -> None:
+    """Print repository status information using git.
+
+    Output:
+      1) Header
+      2) `git status -s`
+      3) `git log -1 --format="%h - %s (%cr)"`
+
+    If git is not available or fails, prints a friendly error message.
+    """
+    GLOBAL_CONSOLE.print("--- Repository Status ---")
+
+    rc1, out1, err1 = _run_git_command(["status", "-s"])
+    if rc1 != 0:
+        GLOBAL_CONSOLE.error(
+            "Git status is unavailable. Ensure 'git' is installed and you are inside a git repository."
+        )
+        if err1.strip():
+            GLOBAL_CONSOLE.error(f"Details: {err1.strip()}")
+        return
+
+    # Print pending changes (can be empty)
+    out1 = out1.rstrip("\n")
+    if out1.strip():
+        GLOBAL_CONSOLE.print(out1)
+    else:
+        GLOBAL_CONSOLE.print("Working tree clean.")
+
+    rc2, out2, err2 = _run_git_command(["log", "-1", "--format=%h - %s (%cr)"])
+    if rc2 != 0:
+        GLOBAL_CONSOLE.error(
+            "Git log is unavailable. Ensure this repository has commits and git is working correctly."
+        )
+        if err2.strip():
+            GLOBAL_CONSOLE.error(f"Details: {err2.strip()}")
+        return
+
+    out2 = out2.strip()
+    if out2:
+        GLOBAL_CONSOLE.print(out2)
+
+
 def _print_help():
     GLOBAL_CONSOLE.print("Available Albert commands:")
     GLOBAL_CONSOLE.print("  implement - Execute an implementation task based on instructions")
     GLOBAL_CONSOLE.print("  test_ai   - Send a minimal test request to the AI")
+    GLOBAL_CONSOLE.print("  status    - Show git working tree status and last commit")
     GLOBAL_CONSOLE.print("  clear     - Clear the terminal screen")
     GLOBAL_CONSOLE.print("  help      - Show this help message")
     GLOBAL_CONSOLE.print("  exit      - Quit the CLI")
@@ -224,7 +286,7 @@ def main():
 
     try:
         while True:
-            user_input = GLOBAL_CONSOLE.input("Command (implement, test_ai, help, clear, exit): ")
+            user_input = GLOBAL_CONSOLE.input("Command (implement, test_ai, status, help, clear, exit): ")
             cmd = user_input.strip().lower()
 
             if cmd in ["exit", "quit"]:
@@ -235,6 +297,9 @@ def main():
 
             elif cmd == "clear":
                 os.system("clear")
+
+            elif cmd == "status":
+                _cmd_status()
 
             elif cmd == "test_ai":
                 if not client:
@@ -301,7 +366,7 @@ def main():
                             subprocess.run(["git", "add", "."], check=True)
                             subprocess.run(["git", "commit", "-m", commit_message], check=True)
                             subprocess.run(["git", "push"], check=True)
-                            
+
                             GLOBAL_CONSOLE.print("✅ Success: Changes applied and pushed.")
                         except subprocess.CalledProcessError as e:
                             GLOBAL_CONSOLE.error(f"❌ Git Error: Command failed. {e}")
