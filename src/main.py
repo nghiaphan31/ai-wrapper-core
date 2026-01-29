@@ -48,7 +48,14 @@ def get_input_from_editor(prompt_text: str) -> str:
 
     tf_path = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w+", delete=False, encoding="utf-8", suffix=".txt") as tf:
+        with tempfile.NamedTemporaryFile(
+            mode="w+",
+            delete=False,
+            encoding="utf-8",
+            prefix="AI_TASK_",
+            suffix=".txt",
+            dir=os.getcwd(),
+        ) as tf:
             tf_path = tf.name
             tf.flush()
 
@@ -68,8 +75,8 @@ def get_input_from_editor(prompt_text: str) -> str:
 
 
 def _print_help():
-    GLOBAL_CONSOLE.print("Available commands:")
-    GLOBAL_CONSOLE.print("  gen_code  - Generate/update code via AI (writes files into artifacts/<step_id>/)")
+    GLOBAL_CONSOLE.print("Available Albert commands:")
+    GLOBAL_CONSOLE.print("  implement - Execute an implementation task based on instructions")
     GLOBAL_CONSOLE.print("  test_ai   - Send a minimal test request to the AI")
     GLOBAL_CONSOLE.print("  clear     - Clear the terminal screen")
     GLOBAL_CONSOLE.print("  help      - Show this help message")
@@ -77,8 +84,11 @@ def _print_help():
 
 
 def main():
+    # Tool identity header (explicit, independent from project.json naming)
+    GLOBAL_CONSOLE.print("--- ALBERT (Your Personal AI Steward) ---")
+
     project_name = GLOBAL_CONFIG.get_project_name()
-    GLOBAL_CONSOLE.print(f"--- {project_name} CLI ---")
+    GLOBAL_CONSOLE.print(f"Project: {project_name}")
     GLOBAL_CONSOLE.print("System initialized. Ready for Phase A/B workflow.")
 
     parser = argparse.ArgumentParser()
@@ -89,7 +99,7 @@ def main():
 
     try:
         while True:
-            user_input = GLOBAL_CONSOLE.input("Command (gen_code, test_ai, help, clear, exit): ")
+            user_input = GLOBAL_CONSOLE.input("Command (implement, test_ai, help, clear, exit): ")
             cmd = user_input.strip().lower()
 
             if cmd in ["exit", "quit"]:
@@ -106,19 +116,24 @@ def main():
                     client = AIClient()
                 client.send_chat_request("You are helpful.", "Say Hello")
 
-            elif cmd == "gen_code":
+            elif cmd == "implement":
                 if not client:
                     client = AIClient()
 
                 # 1. Saisie du besoin (multi-line via nano)
-                user_request = get_input_from_editor("Describe the code to generate")
+                instruction = get_input_from_editor("Describe the implementation task")
+
+                # Strict Filtering (Zero Waste): do NOT build context or call API if empty
+                if not instruction.strip():
+                    GLOBAL_CONSOLE.print("❌ Action cancelled: Empty instruction.")
+                    continue
 
                 # 2. Construction du contexte (La Mémoire)
                 GLOBAL_CONSOLE.print("Building project context...")
                 project_context = GLOBAL_CONTEXT.build_full_context()
 
                 # 3. Assemblage du prompt User final
-                full_user_prompt = f"{user_request}\n\n{project_context}"
+                full_user_prompt = f"{instruction}\n\n{project_context}"
 
                 GLOBAL_CONSOLE.print("Requesting Architect AI (expecting JSON)...")
 

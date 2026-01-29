@@ -1,8 +1,16 @@
-# Documentation Implémentation : Core System
+# Project Albert — Documentation d'Implémentation : Core System
 **Version :** 0.1.0 (Itération 1)
 **Date :** 2026-01-28
 
 ## 1. Vue d'ensemble
+**Project Albert** est un outil local-first qui agit comme un *steward* (intendant) rigoureux entre l’Utilisateur et le Modèle IA.
+
+Albert n’est pas un simple "chat" : il orchestre le workflow, écrit les artefacts sur disque (zéro copy-paste), et impose une **traçabilité vérifiable** (transcript + ledger + payloads bruts). Son rôle central est de garantir qu’à tout moment on puisse répondre, preuves à l’appui :
+* **qui** a demandé **quoi**, **quand**,
+* **quel** modèle a répondu,
+* **quels** fichiers ont été produits/modifiés,
+* et **où** retrouver l’échange brut correspondant.
+
 Le noyau (Core) gère l'initialisation, la configuration et, surtout, la traçabilité des opérations. Il fournit également une boucle CLI interactive et les points d’entrée de workflow (`test_ai`, `implement`).
 
 ## 2. Modules Principaux (`src/`)
@@ -63,14 +71,14 @@ Le wrapper applique une politique **Zero Waste** sur `implement` :
 
 Cela évite de consommer des tokens et du temps sur des invocations accidentelles.
 
-### 2.5 The Universal Launcher (ai script)
-Le projet fournit un script Bash portable `ai` à la racine du dépôt, conçu comme **launcher universel** pour exécuter la CLI sans dépendre du répertoire courant.
+### 2.5 The 'albert' Launcher
+Le projet fournit un script Bash portable `albert` à la racine du dépôt, conçu comme **launcher universel** pour exécuter la CLI sans dépendre du répertoire courant.
 
-* **Portabilité & “symlink-proof” :** le script résout son propre chemin réel via `realpath`, ce qui garantit un comportement correct même si `ai` est appelé via un lien symbolique.
+* **Portabilité & “symlink-proof” :** le script résout son propre chemin réel via `realpath`, ce qui garantit un comportement correct même si `albert` est appelé via un lien symbolique.
 * **Résolution automatique de la racine :** à partir de ce chemin résolu, il déduit la racine du projet.
 * **Auto-venv :** le launcher active automatiquement l’environnement virtuel `.venv` (si présent / attendu) avant de lancer la CLI.
 * **Lancement standard :** exécute la CLI via `python -m src.main`.
-* **Appel global possible :** si `ai` est lié dans le `PATH` (par exemple via un symlink vers `/usr/local/bin/ai`), la commande `ai` devient utilisable globalement, tout en pointant toujours vers la bonne racine projet.
+* **Appel global possible :** si `albert` est lié dans le `PATH` (par exemple via un symlink vers `/usr/local/bin/albert`), la commande `albert` devient utilisable globalement, tout en pointant toujours vers la bonne racine projet.
 
 ## 3. Structure des Données
 Les sessions sont isolées par date. Le Ledger est global au projet.
