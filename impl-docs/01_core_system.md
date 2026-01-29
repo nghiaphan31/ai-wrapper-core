@@ -67,7 +67,18 @@ Commandes disponibles dans la CLI interactive :
 
 > Note : `exit` / `quit` existent également pour quitter la CLI, mais ne font pas partie des commandes « cœur » du workflow.
 
-#### 2.4.2 Nano Integration (multi-line input)
+#### 2.4.2 UX : Contexte critique toujours visible (Project Root)
+Pour éviter toute confusion sur le projet actif (notamment quand plusieurs projets sont ouverts dans différents terminaux), Albert affiche **en permanence la racine projet** au moment où l’utilisateur doit saisir une commande.
+
+**Prompt CLI (format) :**
+```
+[<project_root>]
+Command (implement, test_ai, help, clear, exit):
+```
+
+Ainsi, le **Project Root** est toujours visible à côté du curseur au point de décision.
+
+#### 2.4.3 Nano Integration (multi-line input)
 La commande `implement` supporte une saisie multi-ligne via **Nano Integration**.
 
 * **Fonction :** `get_input_from_editor(prompt_text: str) -> str`
@@ -81,7 +92,7 @@ La commande `implement` supporte une saisie multi-ligne via **Nano Integration**
 
 > Prérequis : `nano` doit être disponible sur le système.
 
-#### 2.4.3 Politique “Zero Waste” (annulation immédiate si entrée vide)
+#### 2.4.4 Politique “Zero Waste” (annulation immédiate si entrée vide)
 Le wrapper applique une politique **Zero Waste** sur `implement` :
 * si l’instruction saisie est vide (ou uniquement des espaces), l’action est **annulée immédiatement**,
 * le wrapper **ne construit pas** le contexte projet,
@@ -90,7 +101,7 @@ Le wrapper applique une politique **Zero Waste** sur `implement` :
 
 Cela évite de consommer des tokens et du temps sur des invocations accidentelles.
 
-#### 2.4.4 Interactive Review Mode (Diff View + Validation Atomique)
+#### 2.4.5 Interactive Review Mode (Diff View + Validation Atomique)
 La commande `implement` inclut désormais un **Interactive Review Mode** qui sert de garde-fou avant d’impacter le dépôt Git.
 
 **Objectif :** transformer l’étape “validation humaine” en une validation **explicite, visuelle et atomique**, basée sur une vue diff.
@@ -105,14 +116,22 @@ Après génération des fichiers par l’IA dans `artifacts/<step_id>/`, Albert 
 
 Cette vue diff est la preuve locale et immédiate de ce qui va changer.
 
-##### B) Validation atomique (Accept-All / Abort-All)
+##### B) UX : Contexte critique toujours visible (Filename)
+Lors de la confirmation, Albert affiche **le chemin du fichier destination (relatif au Project Root)** directement dans le prompt, afin que le nom du fichier soit visible **au point de décision**, même après un long scroll dans le diff.
+
+**Prompt de confirmation (format) :**
+```
+[<relative_destination_path>] Apply this change? [y/n/abort]:
+```
+
+##### C) Validation atomique (Accept-All / Abort-All)
 La validation est **atomique** :
 * l’utilisateur doit accepter **tous** les changements proposés (fichier par fichier),
 * si l’utilisateur refuse un seul fichier (`n` / `abort`), alors **aucun fichier n’est copié** vers les destinations finales.
 
 > Conséquence : pas d’état “partiellement appliqué” via `implement`. Soit tout passe, soit rien ne passe.
 
-##### C) Auto-merge + Auto-commit + Auto-push (en cas de succès)
+##### D) Auto-merge + Auto-commit + Auto-push (en cas de succès)
 Si (et seulement si) la revue interactive est validée pour **tous** les fichiers :
 1. Albert **copie** l’ensemble des fichiers depuis `artifacts/<step_id>/...` vers leurs chemins cibles dans le projet (merge local).
 2. Albert exécute ensuite la séquence Git suivante :
@@ -127,14 +146,14 @@ Si (et seulement si) la revue interactive est validée pour **tous** les fichier
 
 > Note importante : l’affichage diff et la validation atomique constituent la barrière de sécurité qui autorise ensuite l’auto-merge/auto-push.
 
-#### 2.4.5 Commande `status` (état Git rapide)
+#### 2.4.6 Commande `status` (état Git rapide)
 La commande `status` fournit une vue concise de l'état du dépôt.
 
 **Comportement :**
 1. affiche l’en-tête : `--- Repository Status ---`,
 2. exécute `git status -s` pour lister les changements en attente,
 3. exécute `git log -1 --format="%h - %s (%cr)"` pour afficher le dernier commit,
-4. si Git n’est pas disponible (ex: binaire absent) ou si la commande échoue (ex: dossier non-initialisé), Albert affiche un message d’erreur **amical** (avec détails techniques optionnels).
+4. si Git n’est pas disponible (ex: binaire absent) ou si la commande échoue (ex: dossier non-initialisé), Albert affiche un message d'erreur **amical** (avec détails techniques optionnels).
 
 ## 2.5 The 'albert' Launcher
 Le projet fournit un script Bash portable `albert` à la racine du dépôt, conçu comme **launcher universel** pour exécuter la CLI sans dépendre du répertoire courant.

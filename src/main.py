@@ -174,6 +174,12 @@ def review_and_apply(artifact_folder: str | Path, commit_message: str) -> bool:
         rel = artifact_path.relative_to(artifact_folder)
         dest_path = (project_root / rel).resolve()
 
+        # Persistent filename context at decision point
+        try:
+            rel_dest_path = str(dest_path.relative_to(project_root))
+        except Exception:
+            rel_dest_path = str(dest_path)
+
         try:
             new_content = artifact_path.read_text(encoding="utf-8")
         except Exception as e:
@@ -187,7 +193,7 @@ def review_and_apply(artifact_folder: str | Path, commit_message: str) -> bool:
             pass
 
         while True:
-            ans = GLOBAL_CONSOLE.input("Apply this change? [y/n/abort]: ").strip().lower()
+            ans = GLOBAL_CONSOLE.input(f"[{rel_dest_path}] Apply this change? [y/n/abort]: ").strip().lower()
             if ans in {"y", "yes"}:
                 break
             if ans in {"n", "no", "abort"}:
@@ -303,7 +309,10 @@ def main():
 
     try:
         while True:
-            user_input = GLOBAL_CONSOLE.input("Command (implement, test_ai, status, help, clear, exit): ")
+            # Persistent project root context at decision point
+            user_input = GLOBAL_CONSOLE.input(
+                f"[{GLOBAL_CONFIG.project_root}]\nCommand (implement, test_ai, help, clear, exit): "
+            )
             cmd = user_input.strip().lower()
 
             if cmd in ["exit", "quit"]:
@@ -403,9 +412,7 @@ def main():
                             in_cost, out_cost, total_cost = _estimate_cost_usd(usage_stats)
 
                             GLOBAL_CONSOLE.print("✅ Success: Changes applied and pushed.")
-                            GLOBAL_CONSOLE.print(
-                                f"Token Usage: prompt={pt}, completion={ct}, total={tt}"
-                            )
+                            GLOBAL_CONSOLE.print(f"Token Usage: prompt={pt}, completion={ct}, total={tt}")
                             GLOBAL_CONSOLE.print(
                                 f"Estimated Cost: input=${in_cost:.6f}, output=${out_cost:.6f}, total=${total_cost:.6f}"
                             )
