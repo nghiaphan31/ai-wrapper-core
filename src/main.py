@@ -425,6 +425,9 @@ def _build_adhoc_file_injection(file_paths: list[str]) -> tuple[str, list[str], 
         except FileNotFoundError:
             GLOBAL_CONSOLE.error(f"Attached file not found: {fp}")
             return "", attached_names, False
+        except PermissionError as e:
+            GLOBAL_CONSOLE.error(f"Permission error reading attached file '{fp}': {e}")
+            return "", attached_names, False
         except Exception as e:
             GLOBAL_CONSOLE.error(f"Failed to read attached file '{fp}': {e}")
             return "", attached_names, False
@@ -494,6 +497,9 @@ def main():
                 if not client:
                     client = AIClient()
 
+                # Session/Step identity (for traceability)
+                session_id = datetime.now().strftime("%Y-%m-%d")
+
                 # Parse ad-hoc file attachments from the original command line
                 file_paths = _extract_attached_files(tokens[1:])
                 injection_text, _attached, ok = _build_adhoc_file_injection(file_paths)
@@ -515,9 +521,6 @@ def main():
                 # Append transient context (ad-hoc files) for this request only
                 if injection_text:
                     instruction = f"{instruction.rstrip()}\n\n{injection_text.lstrip()}"
-
-                # Session/Step identity (for traceability)
-                session_id = datetime.now().strftime("%Y-%m-%d")
 
                 # 2. Construction du contexte (La Mémoire)
                 GLOBAL_CONSOLE.print(f"Building project context (Scope: {scope})...")
@@ -541,14 +544,6 @@ def main():
                     step_name=step_id,
                     raw_text=json_response,
                 )
-
-                # REQ_DATA_030: generate session manifest after artifacts are processed
-                # (even if zero artifacts were produced, we still write an empty manifest)
-                try:
-                    manifest_rel = GLOBAL_ARTIFACTS.generate_session_manifest(session_id=session_id)
-                    GLOBAL_CONSOLE.print(f"📜 Manifest saved: {manifest_rel}")
-                except Exception as e:
-                    GLOBAL_CONSOLE.error(f"Manifest generation failed: {e}")
 
                 if files:
                     artifact_folder = GLOBAL_CONFIG.project_root / "artifacts" / step_id
@@ -605,6 +600,17 @@ def main():
 
                 else:
                     GLOBAL_CONSOLE.error("No files generated.")
+
+                # REQ_DATA_030: generate session manifest at the end of the implement command.
+                # Must use the same GLOBAL_ARTIFACTS instance so it has artifact history.
+                try:
+                    manifest_rel = GLOBAL_ARTIFACTS.generate_session_manifest(session_id=session_id)
+                    if manifest_rel:
+                        GLOBAL_CONSOLE.print(f"📜  Session Manifest saved: {manifest_rel}")
+                    else:
+                        GLOBAL_CONSOLE.error("Manifest was not saved (see earlier errors).")
+                except Exception as e:
+                    GLOBAL_CONSOLE.error(f"Manifest generation failed: {e}")
 
             else:
                 GLOBAL_CONSOLE.error("Unknown command. Type 'help' to see available commands.")

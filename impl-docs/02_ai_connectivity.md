@@ -1,5 +1,5 @@
 # Documentation Implémentation : AI Connectivity
-**Version :** 0.1.1
+**Version :** 0.1.2
 **Date :** 2026-01-29
 
 ## 1. Vue d'ensemble
@@ -18,7 +18,12 @@ Ce module gère l'interaction sécurisée avec l'API OpenAI. Il isole la gestion
 3.  **Archivage Brut (Raw Exchange) :**
     * Crée un fichier JSON unique **par requête** dans une session **scopée par date** :
       * `sessions/<YYYY-MM-DD>/raw_exchanges/<uuid>.json`
-    * Le wrapper crée automatiquement le dossier si nécessaire (robuste même si `sessions/` n’existe pas encore).
+    * La date est dérivée de `datetime.now()`.
+    * Le wrapper crée automatiquement le dossier `sessions/<YYYY-MM-DD>/raw_exchanges/` si nécessaire.
+    * **Robustesse permissions :** si la création du dossier ou l’écriture échoue (ex: permissions), le wrapper :
+      * affiche une erreur,
+      * continue le workflow,
+      * et logue l’événement ledger sans `payload_ref`.
     * Contient : Timestamp, Modèle, Input complet, Output complet (metadata incluses).
 4.  **Journalisation Ledger :**
     * Enregistre un événement `api_response` dans `ledger/events.jsonl`.

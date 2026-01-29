@@ -66,7 +66,7 @@ class AIClient:
             "total_tokens": total_tokens,
         }
 
-    def _log_raw_exchange(self, request_id: str, raw_data: dict) -> tuple[Path, str]:
+    def _log_raw_exchange(self, request_id: str, raw_data: dict) -> tuple[Path, str] | tuple[None, None]:
         """Persist the raw request/response exchange to the date-scoped session path.
 
         Enforces structure:
@@ -74,16 +74,34 @@ class AIClient:
 
         Returns:
           (raw_path, payload_ref)
+
+        Safety:
+          - Ensures the date folder exists.
+          - Handles permission errors gracefully (returns (None, None)).
         """
         session_date = datetime.now().strftime("%Y-%m-%d")
         raw_filename = f"{request_id}.json"
         raw_path = self.project_root / "sessions" / session_date / "raw_exchanges" / raw_filename
 
         # Safety: create directory even if sessions/ is empty / missing
-        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            raw_path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError as e:
+            GLOBAL_CONSOLE.error(f"Permission error creating raw exchange directory {raw_path.parent}: {e}")
+            return None, None
+        except Exception as e:
+            GLOBAL_CONSOLE.error(f"Failed to create raw exchange directory {raw_path.parent}: {e}")
+            return None, None
 
-        with open(raw_path, "w", encoding="utf-8") as f:
-            json.dump(raw_data, f, indent=2)
+        try:
+            with open(raw_path, "w", encoding="utf-8") as f:
+                json.dump(raw_data, f, indent=2)
+        except PermissionError as e:
+            GLOBAL_CONSOLE.error(f"Permission error writing raw exchange {raw_path}: {e}")
+            return None, None
+        except Exception as e:
+            GLOBAL_CONSOLE.error(f"Failed to write raw exchange {raw_path}: {e}")
+            return None, None
 
         payload_ref = f"sessions/{session_date}/raw_exchanges/{raw_filename}"
         return raw_path, payload_ref
@@ -128,6 +146,7 @@ class AIClient:
             _raw_path, payload_ref = self._log_raw_exchange(request_id=request_id, raw_data=raw_data)
 
             # 5. Enregistrement dans le Ledger (Référence vers le fichier raw)
+            # If raw logging failed, still log the event without payload_ref.
             GLOBAL_LEDGER.log_event(
                 actor="ai_model",
                 action_type="api_response",

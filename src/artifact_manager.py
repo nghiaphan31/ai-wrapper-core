@@ -13,9 +13,9 @@ class ArtifactManager:
         self.project_root = GLOBAL_CONFIG.project_root
         self.artifacts_dir = self.project_root / "artifacts"
 
-        # Tracks artifacts written during the current wrapper session (REQ_DATA_030)
-        # Stores absolute paths as strings for simplicity.
-        self.session_artifacts: list[str] = []
+        # REQ_DATA_030: Track artifacts written during the current wrapper execution.
+        # Store project-root relative paths (strings) to make manifests portable.
+        self._session_artifacts: list[str] = []
 
     def _clean_json_response(self, text: str) -> str:
         """Nettoie les balises Markdown code block si l'IA en ajoute."""
@@ -35,7 +35,7 @@ class ArtifactManager:
                 h.update(chunk)
         return h.hexdigest()
 
-    def generate_session_manifest(self, session_id: str) -> str:
+    def generate_session_manifest(self, session_id: str) -> str | None:
         """Generate a session integrity manifest for artifacts created in this session.
 
         Output path (project-root relative):
@@ -51,15 +51,27 @@ class ArtifactManager:
         }
 
         Safety:
-          - If no artifacts were produced, writes an empty manifest (artifacts=[]).
+          - Handles empty artifact list (writes artifacts=[]).
           - Skips entries whose files no longer exist.
+          - Handles permission errors gracefully.
 
-        Returns the manifest path as a project-root relative string.
+        Behavior:
+          - Clears internal tracking list after writing to avoid duplication.
+
+        Returns:
+          - Manifest path as project-root relative string, or None if manifest could not be written.
         """
         session_id = str(session_id or "").strip() or "unknown"
 
         manifests_dir = self.project_root / "manifests"
-        manifests_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            manifests_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError as e:
+            GLOBAL_CONSOLE.error(f"Permission error creating manifests directory: {e}")
+            return None
+        except Exception as e:
+            GLOBAL_CONSOLE.error(f"Failed to create manifests directory: {e}")
+            return None
 
         manifest_filename = f"session_{session_id}_manifest.json"
         manifest_path = manifests_dir / manifest_filename
@@ -68,30 +80,25 @@ class ArtifactManager:
 
         # de-dup while preserving order
         seen: set[str] = set()
-        for ap in self.session_artifacts:
-            if not ap:
+        for rel_path in list(self._session_artifacts):
+            if not rel_path:
                 continue
-            if ap in seen:
+            if rel_path in seen:
                 continue
-            seen.add(ap)
+            seen.add(rel_path)
 
-            p = Path(ap)
-            if not p.is_absolute():
-                p = (self.project_root / p).resolve()
-
+            p = (self.project_root / rel_path).resolve()
             if not p.exists() or not p.is_file():
                 continue
 
             try:
                 sha = self.calculate_sha256(p)
+            except PermissionError as e:
+                GLOBAL_CONSOLE.error(f"Permission error hashing file for manifest {p}: {e}")
+                continue
             except Exception as e:
                 GLOBAL_CONSOLE.error(f"Manifest hashing failed for {p}: {e}")
                 continue
-
-            try:
-                rel_path = str(p.relative_to(self.project_root))
-            except Exception:
-                rel_path = str(p)
 
             artifacts_out.append({"path": rel_path, "sha256": sha})
 
@@ -101,10 +108,24 @@ class ArtifactManager:
             "artifacts": artifacts_out,
         }
 
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=2)
+        try:
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2)
+        except PermissionError as e:
+            GLOBAL_CONSOLE.error(f"Permission error writing manifest {manifest_path}: {e}")
+            return None
+        except Exception as e:
+            GLOBAL_CONSOLE.error(f"Failed to write manifest {manifest_path}: {e}")
+            return None
+        finally:
+            # Clear after attempt to avoid duplication if called multiple times.
+            # (Even if write failed, keeping the list can cause repeated failures/spam.)
+            self._session_artifacts = []
 
-        return str(manifest_path.relative_to(self.project_root))
+        try:
+            return str(manifest_path.relative_to(self.project_root))
+        except Exception:
+            return str(manifest_path)
 
     def process_response(self, session_id: str, step_name: str, raw_text: str):
         """Transforme le texte brut de l'IA en fichiers physiques.
@@ -128,7 +149,14 @@ class ArtifactManager:
         # Préparation du dossier pour ce step (ex: artifacts/session_date/step_name)
         # Pour simplifier on met tout dans artifacts/<step_name> pour l'instant
         target_dir = self.artifacts_dir / step_name
-        target_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError as e:
+            GLOBAL_CONSOLE.error(f"Permission error creating artifact directory {target_dir}: {e}")
+            return []
+        except Exception as e:
+            GLOBAL_CONSOLE.error(f"Failed to create artifact directory {target_dir}: {e}")
+            return []
 
         created_files = []
 
@@ -152,7 +180,14 @@ class ArtifactManager:
                 continue
 
             # Création des dossiers parents si nécessaire
-            full_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+            except PermissionError as e:
+                GLOBAL_CONSOLE.error(f"Permission error creating parent directories for {full_path}: {e}")
+                continue
+            except Exception as e:
+                GLOBAL_CONSOLE.error(f"Failed to create parent directories for {full_path}: {e}")
+                continue
 
             try:
                 with open(full_path, "w", encoding="utf-8") as f:
@@ -161,8 +196,13 @@ class ArtifactManager:
                 GLOBAL_CONSOLE.print(f"Artifact created: {filepath}")
                 created_files.append(str(full_path))
 
-                # Track for session manifest (REQ_DATA_030)
-                self.session_artifacts.append(str(full_path))
+                # Track for session manifest (REQ_DATA_030) as project-root relative path
+                try:
+                    rel = str(full_path.relative_to(self.project_root))
+                    self._session_artifacts.append(rel)
+                except Exception:
+                    # Fallback: store absolute path if relative conversion fails
+                    self._session_artifacts.append(str(full_path))
 
                 # Log Ledger (File Write)
                 GLOBAL_LEDGER.log_event(
@@ -171,6 +211,8 @@ class ArtifactManager:
                     artifacts=[str(full_path)],
                 )
 
+            except PermissionError as e:
+                GLOBAL_CONSOLE.error(f"Permission error writing artifact {filepath}: {e}")
             except Exception as e:
                 GLOBAL_CONSOLE.error(f"Error writing artifact {filepath}: {e}")
 

@@ -1,5 +1,5 @@
 # Documentation Implémentation : Artifact Management
-**Version :** 0.1.1
+**Version :** 0.1.2
 **Date :** 2026-01-29
 
 ## 1. Vue d'ensemble
@@ -36,9 +36,16 @@ Chaque écriture déclenche :
 
 ### 3.2 Tracking de session (REQ_DATA_030)
 `ArtifactManager` maintient une liste interne :
-* `self.session_artifacts` : liste des chemins de fichiers écrits pendant l’exécution courante.
+* `self._session_artifacts` : liste des **chemins relatifs à la racine projet** des fichiers écrits pendant l’exécution courante.
+
+Exemple d’élément tracké :
+* `artifacts/step_153012/src/main.py`
 
 Cette liste sert de source pour générer le manifest en fin de workflow.
+
+**Règles :**
+* chaque fichier écrit avec succès est ajouté à la liste,
+* la liste est **vidée après génération** du manifest (anti-duplication si la méthode est appelée plusieurs fois).
 
 ### 3.3 Hashing SHA-256
 Méthode :
@@ -70,10 +77,15 @@ Comportement :
 * Si **aucun** artefact n’a été produit, le manifest est tout de même écrit avec :
   * `"artifacts": []`
 * Si un fichier tracké n’existe plus au moment de la génération, il est ignoré (pas de crash).
+* Les erreurs de permissions (création dossier / écriture fichier / lecture hash) sont gérées proprement :
+  * le wrapper affiche une erreur,
+  * et la génération peut retourner `None` sans faire crasher le workflow.
 
 ## 4. Workflow Utilisateur
 1. **Commande `implement`** : l’utilisateur décrit la tâche (multi-ligne possible via Nano Integration).
 2. Albert appelle l’IA et écrit les fichiers dans `artifacts/<step_id>/...`.
-3. Albert génère un manifest de session et affiche :
-   * `📜 Manifest saved: manifests/session_<session_id>_manifest.json`
-4. Albert lance la revue interactive (diff + validation atomique) puis applique/commit/push si validé.
+3. Albert lance la revue interactive (diff + validation atomique) puis applique/commit/push si validé.
+4. **En fin de commande**, Albert génère le manifest de session et affiche :
+   * `📜  Session Manifest saved: manifests/session_<session_id>_manifest.json`
+
+> Note : le manifest est généré via la même instance globale `GLOBAL_ARTIFACTS`, afin de conserver l’historique des fichiers écrits pendant la commande.
