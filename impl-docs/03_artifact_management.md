@@ -18,3 +18,7 @@ L'IA ne doit plus répondre en texte libre pour la génération de code. Elle do
     }
   ]
 }
+```
+
+## 4. Workflow Utilisateur
+1. **Commande `implement`** : l’utilisateur décrit la tâche (multi-ligne possible via Nano Integration).

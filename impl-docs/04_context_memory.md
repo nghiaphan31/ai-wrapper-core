@@ -13,9 +13,9 @@ Ce module donne à l'IA la "vue" sur le projet. Il lit dynamiquement les fichier
 * **Formatage :** Encapsule chaque fichier dans des balises XML-like `<file path='...'>...</file>` pour aider l'IA à distinguer les sources.
 
 ## 3. Injection dans le Prompt
-Lors d'une commande `gen_code`, le workflow est :
-1.  L'utilisateur donne une instruction courte.
-2.  Le Wrapper compile tout le projet en un gros bloc texte ("Resume Pack").
+Lors d'une commande `implement`, le workflow est :
+1.  L'utilisateur donne une instruction (souvent multi-ligne via l’éditeur).
+2.  Le Wrapper compile le projet en un gros bloc texte ("Resume Pack").
 3.  Le prompt final envoyé à l'IA est : `[INSTRUCTION UTILISATEUR] + [CONTEXTE PROJET]`.
 4.  Le System Prompt ordonne à l'IA de renvoyer le **fichier complet** modifié, pas juste un diff (pour simplifier l'écriture disque).
 

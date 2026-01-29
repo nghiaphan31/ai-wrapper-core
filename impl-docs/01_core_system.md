@@ -3,7 +3,7 @@
 **Date :** 2026-01-28
 
 ## 1. Vue d'ensemble
-Le noyau (Core) gère l'initialisation, la configuration et, surtout, la traçabilité des opérations. Il fournit également une boucle CLI interactive (commandes `help`, `clear`, `exit`) et les points d’entrée de workflow (`test_ai`, `gen_code`).
+Le noyau (Core) gère l'initialisation, la configuration et, surtout, la traçabilité des opérations. Il fournit également une boucle CLI interactive et les points d’entrée de workflow (`test_ai`, `implement`).
 
 ## 2. Modules Principaux (`src/`)
 
@@ -30,15 +30,18 @@ Le noyau (Core) gère l'initialisation, la configuration et, surtout, la traçab
 * **Exécution :** `python3 -m src.main` (requis pour la résolution des packages).
 * **Rôle :** Orchestre le démarrage et la boucle d'interaction.
 * **Boucle interactive :** attend une commande utilisateur et route vers les actions.
-* **Commandes disponibles :**
-  * `help` : affiche l’aide.
-  * `clear` : efface l’écran via `clear`.
-  * `exit` / `quit` : quitte la CLI.
-  * `test_ai` : envoie une requête minimale à l’IA (sanity check de connectivité).
-  * `gen_code` : génère/met à jour du code via l’IA et écrit les fichiers dans `artifacts/<step_id>/`.
 
-#### 2.4.1 Nano Integration (multi-line input)
-La commande `gen_code` supporte désormais une saisie multi-ligne via **Nano Integration**.
+#### 2.4.1 Commandes interactives
+Commandes disponibles dans la CLI interactive :
+* `implement` : exécute une tâche d’implémentation via l’IA et écrit les fichiers dans `artifacts/<step_id>/`.
+* `test_ai` : envoie une requête minimale à l’IA (sanity check de connectivité).
+* `help` : affiche l’aide.
+* `clear` : efface l’écran via `clear`.
+
+> Note : `exit` / `quit` existent également pour quitter la CLI, mais ne font pas partie des commandes « cœur » du workflow.
+
+#### 2.4.2 Nano Integration (multi-line input)
+La commande `implement` supporte une saisie multi-ligne via **Nano Integration**.
 
 * **Fonction :** `get_input_from_editor(prompt_text: str) -> str`
 * **Principe :** au lieu d’un `input()` mono-ligne, le wrapper ouvre l’éditeur `nano` sur un fichier temporaire, puis relit le contenu complet du fichier à la fermeture.
@@ -46,17 +49,28 @@ La commande `gen_code` supporte désormais une saisie multi-ligne via **Nano Int
 * **Flux :**
   1) création d’un fichier temporaire (`tempfile.NamedTemporaryFile(..., delete=False)`),
   2) ouverture de `nano` (`subprocess.run(["nano", tf_path], check=False)`),
-  3) lecture du contenu du fichier, 
+  3) lecture du contenu du fichier,
   4) suppression du fichier temporaire.
 
-> Note : cette intégration suppose que `nano` est disponible sur le système.
+> Prérequis : `nano` doit être disponible sur le système.
+
+#### 2.4.3 Politique “Zero Waste” (annulation immédiate si entrée vide)
+Le wrapper applique une politique **Zero Waste** sur `implement` :
+* si l’instruction saisie est vide (ou uniquement des espaces), l’action est **annulée immédiatement**,
+* le wrapper **ne construit pas** le contexte projet,
+* le wrapper **n’appelle pas** l’API IA,
+* aucun artefact n’est généré.
+
+Cela évite de consommer des tokens et du temps sur des invocations accidentelles.
 
 ### 2.5 The Universal Launcher (ai script)
 Le projet fournit un script Bash portable `ai` à la racine du dépôt, conçu comme **launcher universel** pour exécuter la CLI sans dépendre du répertoire courant.
 
 * **Portabilité & “symlink-proof” :** le script résout son propre chemin réel via `realpath`, ce qui garantit un comportement correct même si `ai` est appelé via un lien symbolique.
-* **Résolution automatique de la racine :** à partir de ce chemin résolu, il déduit la racine du projet, active automatiquement l’environnement virtuel `.venv`, puis lance la CLI via `src.main`.
-* **Appel global possible :** si `ai` est lié dans le PATH (par exemple via un symlink vers `/usr/local/bin/ai`), la commande `ai` devient utilisable globalement, tout en pointant toujours vers la bonne racine projet.
+* **Résolution automatique de la racine :** à partir de ce chemin résolu, il déduit la racine du projet.
+* **Auto-venv :** le launcher active automatiquement l’environnement virtuel `.venv` (si présent / attendu) avant de lancer la CLI.
+* **Lancement standard :** exécute la CLI via `python -m src.main`.
+* **Appel global possible :** si `ai` est lié dans le `PATH` (par exemple via un symlink vers `/usr/local/bin/ai`), la commande `ai` devient utilisable globalement, tout en pointant toujours vers la bonne racine projet.
 
 ## 3. Structure des Données
 Les sessions sont isolées par date. Le Ledger est global au projet.
