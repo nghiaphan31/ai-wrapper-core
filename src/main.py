@@ -1,7 +1,6 @@
 import os
 import sys
 import argparse
-import uuid
 import subprocess
 import tempfile
 import difflib
@@ -542,6 +541,14 @@ def main():
                     step_name=step_id,
                     raw_text=json_response,
                 )
+
+                # REQ_DATA_030: generate session manifest after artifacts are processed
+                # (even if zero artifacts were produced, we still write an empty manifest)
+                try:
+                    manifest_rel = GLOBAL_ARTIFACTS.generate_session_manifest(session_id=session_id)
+                    GLOBAL_CONSOLE.print(f"📜 Manifest saved: {manifest_rel}")
+                except Exception as e:
+                    GLOBAL_CONSOLE.error(f"Manifest generation failed: {e}")
 
                 if files:
                     artifact_folder = GLOBAL_CONFIG.project_root / "artifacts" / step_id

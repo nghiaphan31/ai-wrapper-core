@@ -1,6 +1,6 @@
 # Documentation Implémentation : AI Connectivity
-**Version :** 0.1.0 (Itération 2)
-**Date :** 2026-01-28
+**Version :** 0.1.1
+**Date :** 2026-01-29
 
 ## 1. Vue d'ensemble
 Ce module gère l'interaction sécurisée avec l'API OpenAI. Il isole la gestion des secrets et garantit que chaque octet échangé avec l'IA est archivé pour audit.
@@ -16,11 +16,16 @@ Ce module gère l'interaction sécurisée avec l'API OpenAI. Il isole la gestion
 1.  **Construction :** Prépare les messages (System + User).
 2.  **Appel API :** Utilise le client officiel `openai` (synchronous).
 3.  **Archivage Brut (Raw Exchange) :**
-    * Crée un fichier JSON unique par requête dans `sessions/raw_exchanges/<uuid>.json`.
+    * Crée un fichier JSON unique **par requête** dans une session **scopée par date** :
+      * `sessions/<YYYY-MM-DD>/raw_exchanges/<uuid>.json`
+    * Le wrapper crée automatiquement le dossier si nécessaire (robuste même si `sessions/` n’existe pas encore).
     * Contient : Timestamp, Modèle, Input complet, Output complet (metadata incluses).
 4.  **Journalisation Ledger :**
     * Enregistre un événement `api_response` dans `ledger/events.jsonl`.
-    * Inclut une référence (`payload_ref`) vers le fichier JSON brut.
+    * Inclut une référence (`payload_ref`) vers le fichier JSON brut, ex:
+      * `sessions/<YYYY-MM-DD>/raw_exchanges/<uuid>.json`
+
+> Note : cette structure aligne le stockage brut sur la logique “sessions datées” (Section 10 de la baseline).
 
 ## 3. Configuration
 * **Modèle :** Défini dans `project.json` sous `policy.model_alias` (défaut: gpt-4o ou gpt-5.2 selon disponibilité).

@@ -66,6 +66,28 @@ class AIClient:
             "total_tokens": total_tokens,
         }
 
+    def _log_raw_exchange(self, request_id: str, raw_data: dict) -> tuple[Path, str]:
+        """Persist the raw request/response exchange to the date-scoped session path.
+
+        Enforces structure:
+          sessions/<YYYY-MM-DD>/raw_exchanges/<uuid>.json
+
+        Returns:
+          (raw_path, payload_ref)
+        """
+        session_date = datetime.now().strftime("%Y-%m-%d")
+        raw_filename = f"{request_id}.json"
+        raw_path = self.project_root / "sessions" / session_date / "raw_exchanges" / raw_filename
+
+        # Safety: create directory even if sessions/ is empty / missing
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(raw_path, "w", encoding="utf-8") as f:
+            json.dump(raw_data, f, indent=2)
+
+        payload_ref = f"sessions/{session_date}/raw_exchanges/{raw_filename}"
+        return raw_path, payload_ref
+
     def send_chat_request(self, system_prompt: str, user_prompt: str) -> tuple[str, dict]:
         """Envoie une requête à l'IA, logue tout (Raw + Ledger), et retourne (content, usage_stats)."""
         request_id = str(uuid.uuid4())
@@ -103,18 +125,13 @@ class AIClient:
                 "raw_response": response.model_dump(),  # Sérialise l'objet réponse complet
             }
 
-            raw_filename = f"{request_id}.json"
-            raw_path = self.project_root / "sessions" / "raw_exchanges" / raw_filename
-            raw_path.parent.mkdir(parents=True, exist_ok=True)
-
-            with open(raw_path, "w", encoding="utf-8") as f:
-                json.dump(raw_data, f, indent=2)
+            _raw_path, payload_ref = self._log_raw_exchange(request_id=request_id, raw_data=raw_data)
 
             # 5. Enregistrement dans le Ledger (Référence vers le fichier raw)
             GLOBAL_LEDGER.log_event(
                 actor="ai_model",
                 action_type="api_response",
-                payload_ref=f"sessions/raw_exchanges/{raw_filename}",
+                payload_ref=payload_ref,
                 artifacts=[],
             )
 
