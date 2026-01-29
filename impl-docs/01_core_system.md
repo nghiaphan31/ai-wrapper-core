@@ -71,6 +71,40 @@ Le wrapper applique une politique **Zero Waste** sur `implement` :
 
 Cela évite de consommer des tokens et du temps sur des invocations accidentelles.
 
+#### 2.4.4 Interactive Review Mode (Diff View + Validation Atomique)
+La commande `implement` inclut désormais un **Interactive Review Mode** qui sert de garde-fou avant d’impacter le dépôt Git.
+
+**Objectif :** transformer l’étape “validation humaine” en une validation **explicite, visuelle et atomique**, basée sur une vue diff.
+
+##### A) Diff View (validation par comparaison)
+Après génération des fichiers par l’IA dans `artifacts/<step_id>/`, Albert :
+1. parcourt tous les fichiers générés dans ce dossier,
+2. calcule pour chacun la **destination réelle** dans le projet en retirant le préfixe `artifacts/<step_id>/` (ex: `artifacts/step_123/src/x.py` -> `src/x.py`),
+3. affiche un **unified diff** entre :
+   * l’état actuel du fichier destination (si existant), et
+   * le nouveau contenu produit dans l’artefact.
+
+Cette vue diff est la preuve locale et immédiate de ce qui va changer.
+
+##### B) Validation atomique (Accept-All / Abort-All)
+La validation est **atomique** :
+* l’utilisateur doit accepter **tous** les changements proposés (fichier par fichier),
+* si l’utilisateur refuse un seul fichier (`n` / `abort`), alors **aucun fichier n’est copié** vers les destinations finales.
+
+> Conséquence : pas d’état “partiellement appliqué” via `implement`. Soit tout passe, soit rien ne passe.
+
+##### C) Auto-merge + Auto-commit + Auto-push (en cas de succès)
+Si (et seulement si) la revue interactive est validée pour **tous** les fichiers :
+1. Albert **copie** l’ensemble des fichiers depuis `artifacts/<step_id>/...` vers leurs chemins cibles dans le projet (merge local).
+2. Albert exécute ensuite la séquence Git suivante :
+   * `git add .`
+   * `git commit -m <message>` (le message est dérivé de l’instruction utilisateur)
+   * `git push`
+
+**Résultat :** une exécution `implement` validée aboutit à une modification **appliquée**, **commitée** et **poussée** automatiquement.
+
+> Note importante : l’affichage diff et la validation atomique constituent la barrière de sécurité qui autorise ensuite l’auto-merge/auto-push.
+
 ### 2.5 The 'albert' Launcher
 Le projet fournit un script Bash portable `albert` à la racine du dépôt, conçu comme **launcher universel** pour exécuter la CLI sans dépendre du répertoire courant.
 
