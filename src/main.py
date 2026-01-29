@@ -6,6 +6,7 @@ import tempfile
 import difflib
 import shutil
 import shlex
+import uuid
 from datetime import datetime
 from pathlib import Path
 from src.config import GLOBAL_CONFIG
@@ -232,7 +233,7 @@ def _cmd_status() -> None:
     Output:
       1) Header
       2) `git status -s`
-      3) `git log -1 --format="%h - %s (%cr)"`
+      3) `git log -1 --format=\"%h - %s (%cr)\"`
 
     If git is not available or fails, prints a friendly error message.
     """
@@ -440,6 +441,25 @@ def _build_adhoc_file_injection(file_paths: list[str]) -> tuple[str, list[str], 
     return "".join(injection_parts), attached_names, True
 
 
+def _generate_step_id(now: datetime | None = None) -> str:
+    """Generate a chronologically sortable step id for artifact folder naming.
+
+    Format:
+      step_%Y%m%d_%H%M%S_<short_id>
+
+    Example:
+      step_20260130_120500_a1b2
+
+    Notes:
+      - Timestamp ensures chronological ordering without relying on filesystem metadata.
+      - short_id is derived from uuid4 hex, truncated for readability.
+    """
+    dt = now or datetime.now()
+    timestamp = dt.strftime("%Y%m%d_%H%M%S")
+    short_id = uuid.uuid4().hex[:4]
+    return f"step_{timestamp}_{short_id}"
+
+
 def main():
     # Tool identity header (explicit, independent from project.json naming)
     GLOBAL_CONSOLE.print("--- ALBERT (Your Personal AI Steward) ---")
@@ -538,7 +558,7 @@ def main():
                 )
 
                 # 5. Écriture des artefacts
-                step_id = f"step_{datetime.now().strftime('%H%M%S')}"
+                step_id = _generate_step_id()
                 files = GLOBAL_ARTIFACTS.process_response(
                     session_id="current",
                     step_name=step_id,

@@ -50,6 +50,7 @@ Arborescence racine : `~/ai-work/projects/<project_slug>/`
 * `inputs/` [NO GIT] : Documents sources bruts copiés pour analyse.
 * `outputs/` [NO GIT] : Fichiers générés intermédiaires.
 * `artifacts/` [NO GIT] : Stockage "en vrac" des fichiers produits, bundles zip, binaires.
+  * **Convention de nommage (Exigence de traçabilité) :** les dossiers d’artefacts **DOIVENT** suivre le pattern `step_YYYYMMDD_HHMMSS_<short_id>` afin de garantir la **triabilité chronologique** et la **traçabilité** (ex: `step_20260130_120500_a1b2`).
 * `ledger/` [NO GIT] : Journaux d'audit structurés (références croisées).
 * `manifests/` [NO GIT] : **Notary Ledger** local pour les artefacts non versionnés.
   * Rôle : servir de registre d’intégrité/traçabilité pour les fichiers **hors Git** (ex: `artifacts/`, `outputs/`, bundles, binaires), afin de pouvoir prouver **quels fichiers** ont été produits, **où** ils sont stockés, et **avec quelle empreinte cryptographique**.
@@ -178,7 +179,7 @@ Le wrapper distingue formellement deux catégories de contexte injectées au mod
   * le contenu brut,
   afin de permettre au modèle de distinguer les sources.
 
-**Séparation et non-persistance (REQ-AFI-003) — Distinct du Project Context :**
+**Séparation et non-persistance (REQ-AFI-003) — Distinct du Project Context persistant :**
 * Les fichiers ad-hoc NE DOIVENT PAS être intégrés automatiquement au Project Context (ex: ne pas les copier dans specs/, impl-docs/, src/ ou notes/ par défaut).
 * Le wrapper DOIT traiter ces fichiers comme éphémères pour la requête courante.
 
@@ -310,7 +311,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_CORE_019 | CORE | Critère d’acceptation : l’IA DOIT refuser d’écrire du code (`src`) si on est en phase de définition (`specs`). | P0 |
 | REQ_AUDIT_016 | AUDIT | Critère d’acceptation : on DOIT pouvoir créer une session, appeler l’IA, et retrouver prompt, réponse brute, resume pack mis à jour, ledger événementiel. | P0 |
 | REQ_AUDIT_017 | AUDIT | Critère d’acceptation : l’utilisateur DOIT pouvoir prouver via `transcript.log` ce qu’il a demandé et le comparer au JSON brut de la réponse IA lié dans le ledger. | P0 |
-| REQ_CORE_020 | CORE | Critère d’acceptation : intégrité code “zéro copy-paste” — le code dans `artifacts/` DOIT être strictement identique au code reçu dans la réponse JSON de l’IA. | P0 |
+| REQ_CORE_020 | CORE | Critère d’acceptation : intégrité code “zéro copy-paste” — le code dans `artifacts/` DOIT être strictement identique au code reçu dans la réponse JSON de l'IA. | P0 |
 | REQ_CORE_021 | CORE | Critère d’acceptation : la reprise d’une session NE DOIT PAS nécessiter de renvoyer tout l’historique. | P0 |
 | REQ_AUDIT_018 | AUDIT | Critère d’acceptation : les coûts/tokens DOIVENT être visibles et agrégés. | P0 |
 | REQ_AUDIT_019 | AUDIT | Critère d’acceptation : les commandes/scripts proposés DOIVENT être journalisés et NE DOIVENT PAS s’exécuter “en douce”. | P0 |

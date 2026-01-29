@@ -1,5 +1,5 @@
 # Documentation Implémentation : Artifact Management
-**Version :** 0.1.2
+**Version :** 0.1.3
 **Date :** 2026-01-29
 
 ## 1. Vue d'ensemble
@@ -27,8 +27,16 @@ L'IA ne doit plus répondre en texte libre pour la génération de code. Elle do
 ### 3.1 Écriture des artefacts
 * Les fichiers sont écrits sous :
   * `artifacts/<step_id>/<path>`
-* Exemple :
-  * `artifacts/step_153012/src/main.py`
+
+### 3.1.1 Artifact Storage Structure (naming convention)
+**Convention (alignée Specs / baseline) :** les dossiers d’artefacts suivent le pattern :
+
+`step_YYYYMMDD_HHMMSS_<short_id>`
+
+Exemple :
+* `artifacts/step_20260130_120500_a1b2/src/main.py`
+
+**Note importante :** le *timestamping* assure un audit chronologique **sans dépendre des metadata du système de fichiers** (mtime/ctime), ce qui renforce la traçabilité lors d’exports, copies, ou restaurations.
 
 Chaque écriture déclenche :
 * un log console `Artifact created: ...`
@@ -39,7 +47,7 @@ Chaque écriture déclenche :
 * `self._session_artifacts` : liste des **chemins relatifs à la racine projet** des fichiers écrits pendant l’exécution courante.
 
 Exemple d’élément tracké :
-* `artifacts/step_153012/src/main.py`
+* `artifacts/step_20260130_120500_a1b2/src/main.py`
 
 Cette liste sert de source pour générer le manifest en fin de workflow.
 
@@ -67,7 +75,7 @@ Structure JSON :
   "session_id": "...",
   "timestamp": "...",
   "artifacts": [
-    {"path": "artifacts/step_X/file.py", "sha256": "..."}
+    {"path": "artifacts/step_20260130_120500_a1b2/file.py", "sha256": "..."}
   ]
 }
 ```
