@@ -297,13 +297,16 @@ def main():
 
                         # Git Phase
                         try:
+                            # Use check=True to raise CalledProcessError on failure
                             subprocess.run(["git", "add", "."], check=True)
                             subprocess.run(["git", "commit", "-m", commit_message], check=True)
                             subprocess.run(["git", "push"], check=True)
-                        except subprocess.CalledProcessError as e:
-                            GLOBAL_CONSOLE.print(f"❌ Git Error: {e}")
-                        else:
+                            
                             GLOBAL_CONSOLE.print("✅ Success: Changes applied and pushed.")
+                        except subprocess.CalledProcessError as e:
+                            GLOBAL_CONSOLE.error(f"❌ Git Error: Command failed. {e}")
+                            # Do not print Success.
+                            # We do not abort the script, just report the error.
                     else:
                         GLOBAL_CONSOLE.print("Changes were not applied.")
 
