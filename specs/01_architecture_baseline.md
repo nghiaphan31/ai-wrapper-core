@@ -51,7 +51,11 @@ Arborescence racine : `~/ai-work/projects/<project_slug>/`
 * `outputs/` [NO GIT] : Fichiers générés intermédiaires.
 * `artifacts/` [NO GIT] : Stockage "en vrac" des fichiers produits, bundles zip, binaires.
 * `ledger/` [NO GIT] : Journaux d'audit structurés (références croisées).
-* `manifests/` [NO GIT] : Index locaux et hashes.
+* `manifests/` [NO GIT] : **Notary Ledger** local pour les artefacts non versionnés.
+  * Rôle : servir de registre d’intégrité/traçabilité pour les fichiers **hors Git** (ex: `artifacts/`, `outputs/`, bundles, binaires), afin de pouvoir prouver **quels fichiers** ont été produits, **où** ils sont stockés, et **avec quelle empreinte cryptographique**.
+  * Format : fichiers manifest structurés en **JSON** (machine-readable).
+  * Nommage : les manifests DOIVENT utiliser un pattern unique, par exemple : `session_<uuid>_manifest.json` (ou un pattern similaire garantissant l’unicité).
+  * Contexte d’archivage : ce dossier constitue le **pont** entre le workspace local et des systèmes d’archivage externes de type **Content Addressable Storage (CAS)**. Le manifest agit comme “preuve notariale” permettant de réconcilier un export/backup externe avec l’état local (fichiers non versionnés).
 
 **Règles de Versioning :**
 * Séparation stricte : Le code "source" du projet (dans src/) ainsi que la documentation (Specs + Impl) sont versionnés. Les données opérationnelles (Sessions + Logs + Artefacts) restent locales.
@@ -321,6 +325,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_CORE_025 | CORE | **(Ghost Feature GF-007) Context Scoping :** le système DOIT permettre à l’utilisateur de sélectionner des scopes de contexte (ex: full, code, specs) afin d’optimiser l’usage des tokens. | P1 |
 | REQ_DATA_026 | DATA | **(Ghost Feature GF-003) Auto-Git Workflow :** le système DOIT exécuter automatiquement une séquence atomique git commit/push **APRÈS** validation explicite des changements par l’utilisateur. | P0 |
 | REQ_COST_005 | COST | **(Ghost Feature GF-006) Zero Waste Policy :** le système DOIT interrompre immédiatement le processus si l’instruction utilisateur est vide, afin d’éviter tout appel API et toute dépense de tokens inutile. | P0 |
+| REQ_DATA_030 | Data Integrity | **Session Integrity Manifest :** At the conclusion of each session, the system MUST generate a structured manifest file (JSON) containing the list of all artifacts created, their storage paths, and their SHA-256 cryptographic hashes. This ensures integrity and traceability for non-versioned files. | High |
 
 ### 14.1 Vérification de cohérence (aucune exigence “hors-prose”)
 Toutes les exigences listées ci-dessus sont des reformulations directes (ou reprises exactes) des sections 1 à 13.
