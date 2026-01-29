@@ -3,7 +3,7 @@
 **Date :** 2026-01-28
 
 ## 1. Vue d'ensemble
-Le noyau (Core) gère l'initialisation, la configuration et, surtout, la traçabilité des opérations. Il ne contient pas encore de logique IA.
+Le noyau (Core) gère l'initialisation, la configuration et, surtout, la traçabilité des opérations. Il fournit également une boucle CLI interactive (commandes `help`, `clear`, `exit`) et les points d’entrée de workflow (`test_ai`, `gen_code`).
 
 ## 2. Modules Principaux (`src/`)
 
@@ -22,13 +22,34 @@ Le noyau (Core) gère l'initialisation, la configuration et, surtout, la traçab
 ### 2.3 Console & Transcript (`console.py`)
 * **Rôle :** Interface Homme-Machine. Capture stdin/stdout.
 * **Fichier de sortie :** `sessions/<YYYY-MM-DD>/transcript.log`.
-* **Fonctionnement :** * Remplace `print()` par `GLOBAL_CONSOLE.print()` -> Écrit écran + log avec prefix `[WRAPPER]`.
+* **Fonctionnement :**
+    * Remplace `print()` par `GLOBAL_CONSOLE.print()` -> Écrit écran + log avec prefix `[WRAPPER]`.
     * Remplace `input()` par `GLOBAL_CONSOLE.input()` -> Capture saisie + log avec prefix `[USER]`.
 
-### 2.4 Point d'Entrée (`main.py`)
-* **Exécution :** `python3 -m src.main` (Requis pour la résolution des packages).
+### 2.4 Point d'Entrée / CLI (`main.py`)
+* **Exécution :** `python3 -m src.main` (requis pour la résolution des packages).
 * **Rôle :** Orchestre le démarrage et la boucle d'interaction.
-* **Mode interactif :** Le point d’entrée expose désormais une boucle CLI avec des commandes interactives intégrées (ex: `help`, `clear`, `exit`), en plus des commandes de workflow (ex: `gen_code`, `test_ai`).
+* **Boucle interactive :** attend une commande utilisateur et route vers les actions.
+* **Commandes disponibles :**
+  * `help` : affiche l’aide.
+  * `clear` : efface l’écran via `clear`.
+  * `exit` / `quit` : quitte la CLI.
+  * `test_ai` : envoie une requête minimale à l’IA (sanity check de connectivité).
+  * `gen_code` : génère/met à jour du code via l’IA et écrit les fichiers dans `artifacts/<step_id>/`.
+
+#### 2.4.1 Nano Integration (multi-line input)
+La commande `gen_code` supporte désormais une saisie multi-ligne via **Nano Integration**.
+
+* **Fonction :** `get_input_from_editor(prompt_text: str) -> str`
+* **Principe :** au lieu d’un `input()` mono-ligne, le wrapper ouvre l’éditeur `nano` sur un fichier temporaire, puis relit le contenu complet du fichier à la fermeture.
+* **Objectif :** permettre des prompts longs/multi-lignes de façon plus sûre (notamment pour le copy-paste de gros blocs), en réduisant les erreurs de terminal et les troncatures.
+* **Flux :**
+  1) création d’un fichier temporaire (`tempfile.NamedTemporaryFile(..., delete=False)`),
+  2) ouverture de `nano` (`subprocess.run(["nano", tf_path], check=False)`),
+  3) lecture du contenu du fichier, 
+  4) suppression du fichier temporaire.
+
+> Note : cette intégration suppose que `nano` est disponible sur le système.
 
 ## 3. Structure des Données
 Les sessions sont isolées par date. Le Ledger est global au projet.

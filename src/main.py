@@ -2,6 +2,8 @@ import os
 import sys
 import argparse
 import uuid
+import subprocess
+import tempfile
 from datetime import datetime
 from src.config import GLOBAL_CONFIG
 from src.audit import GLOBAL_LEDGER
@@ -29,6 +31,40 @@ RESPONSE FORMAT:
 
 NOTE: If updating an existing file found in context, provide the FULL new content of the file, not just a diff.
 """
+
+
+def get_input_from_editor(prompt_text: str) -> str:
+    """Collect multi-line user input by opening nano on a temporary file.
+
+    Flow:
+      1) Create a NamedTemporaryFile
+      2) Open nano so the user can type freely
+      3) Read back the file content
+      4) Delete the temp file
+
+    Returns the full text (may be empty if user saved nothing).
+    """
+    GLOBAL_CONSOLE.print(f"{prompt_text} (opening nano; save + exit to continue)")
+
+    tf_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w+", delete=False, encoding="utf-8", suffix=".txt") as tf:
+            tf_path = tf.name
+            tf.flush()
+
+        # Let the user edit in nano
+        subprocess.run(["nano", tf_path], check=False)
+
+        # Read back content
+        with open(tf_path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    finally:
+        if tf_path:
+            try:
+                os.remove(tf_path)
+            except FileNotFoundError:
+                pass
 
 
 def _print_help():
@@ -74,8 +110,8 @@ def main():
                 if not client:
                     client = AIClient()
 
-                # 1. Saisie du besoin
-                user_request = GLOBAL_CONSOLE.input("Instruction: ")
+                # 1. Saisie du besoin (multi-line via nano)
+                user_request = get_input_from_editor("Describe the code to generate")
 
                 # 2. Construction du contexte (La Mémoire)
                 GLOBAL_CONSOLE.print("Building project context...")
