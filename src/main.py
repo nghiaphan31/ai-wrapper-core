@@ -77,7 +77,7 @@ def get_input_from_editor(prompt_text: str) -> str:
                 pass
 
 
-def show_diff(target_path: str | Path, new_content: str) -> bool:
+def show_diff(target_path: str | Path, new_content: str, title_new: str = "Incoming Change") -> bool:
     """Print a colored unified diff between an existing file and new content.
 
     - Green for added lines (+)
@@ -103,7 +103,7 @@ def show_diff(target_path: str | Path, new_content: str) -> bool:
             old_lines,
             new_lines,
             fromfile=str(target_path),
-            tofile=str(target_path),
+            tofile=title_new,
             lineterm="",
         )
     )
@@ -170,7 +170,7 @@ def review_and_apply(artifact_folder: str | Path, commit_message: str) -> bool:
             GLOBAL_CONSOLE.error(f"Cannot read artifact file {artifact_path}: {e}")
             return False
 
-        has_changes = show_diff(dest_path, new_content)
+        has_changes = show_diff(dest_path, new_content, title_new="Artifact (New)")
         if not has_changes:
             # Still ask? spec says prompts for each file; but no changes should be safe to auto-accept.
             # We'll still prompt to keep behavior consistent.
@@ -286,11 +286,14 @@ def main():
                             shutil.copyfile(artifact_path, dest_path)
 
                         # Git Phase
-                        subprocess.run(["git", "add", "."], check=False)
-                        subprocess.run(["git", "commit", "-m", commit_message], check=False)
-                        subprocess.run(["git", "push"], check=False)
-
-                        GLOBAL_CONSOLE.print("✅ Success: Changes applied and pushed.")
+                        try:
+                            subprocess.run(["git", "add", "."], check=True)
+                            subprocess.run(["git", "commit", "-m", commit_message], check=True)
+                            subprocess.run(["git", "push"], check=True)
+                        except subprocess.CalledProcessError as e:
+                            GLOBAL_CONSOLE.print(f"❌ Git Error: {e}")
+                        else:
+                            GLOBAL_CONSOLE.print("✅ Success: Changes applied and pushed.")
                     else:
                         GLOBAL_CONSOLE.print("Changes were not applied.")
 
