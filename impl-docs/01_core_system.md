@@ -22,6 +22,15 @@ En plus du ledger événementiel (machine-level), Albert maintient désormais un
 
 > Le ledger événementiel (`ledger/events.jsonl`) reste la source de vérité pour les événements fins (api_response, file_write, etc.). L'audit ledger (`audit_log.jsonl`) est un résumé transactionnel orienté comptabilité.
 
+### 1.2 Financial & Operational Reporting (Visibility Gap Closure)
+Albert inclut désormais une capacité de **reporting agrégé** pour combler le manque de visibilité sur les tokens et les coûts.
+
+* **Commande CLI :** `report`
+* **Source de données :** `audit_log.jsonl`
+* **Sortie console :** un tableau de bord concis (transactions, tokens in/out, coût estimé, chemin du ledger)
+* **Tolérance :** si le ledger est absent ou vide, le rapport affiche des zéros (pas de crash).
+
+
 ## 2. Modules Principaux (`src/`)
 
 ### 2.1 Configuration (`config.py`)
@@ -29,6 +38,22 @@ En plus du ledger événementiel (machine-level), Albert maintient désormais un
 * **Classe :** `ConfigLoader`
 * **Instance Globale :** `GLOBAL_CONFIG`
 * **Comportement :** Lève une erreur critique si le JSON est malformé ou absent.
+
+#### 2.1.1 Centralisation du Pricing (PRICING_RATES)
+La grille de pricing utilisée pour estimer les coûts est centralisée dans la configuration globale.
+
+* **Emplacement :** `GLOBAL_CONFIG.PRICING_RATES`
+* **Format :**
+  ```python
+  {
+    "input_per_1m": 2.50,
+    "output_per_1m": 10.00
+  }
+  ```
+* **Interprétation :** USD par 1 million de tokens.
+* **But :** supprimer tout hardcoding des prix dans la logique (calculs de coût cohérents dans tout le projet).
+
+> Note : ce pricing est une **estimation locale** (non facturante), destinée au pilotage opérationnel.
 
 ### 2.2 Audit & Ledger (`audit.py`)
 * **Rôle :** Journalisation structurée pour les machines (JSONL) + Audit transactionnel.
@@ -44,6 +69,18 @@ En plus du ledger événementiel (machine-level), Albert maintient désormais un
 * **Contenu :** timestamp ISO8601 UTC + tokens + statut.
 
 * **Instance Globale :** `GLOBAL_LEDGER`
+
+#### 2.2.3 Reporting (agrégation)
+* **Méthode :** `generate_report(timeframe='all')`
+* **Timeframes supportés :**
+  * `all` : toutes les transactions
+  * `today` : transactions dont `session_id == YYYY-MM-DD` du jour
+  * `session` : alias actuel de `today` (même logique)
+* **Agrégats :**
+  * total transactions
+  * total prompt tokens (input)
+  * total completion tokens (output)
+  * coût estimé (via `GLOBAL_CONFIG.PRICING_RATES`)
 
 ### 2.3 Console & Transcript (`console.py`)
 * **Rôle :** Interface Homme-Machine. Capture stdin/stdout.
@@ -63,6 +100,7 @@ Commandes disponibles dans la CLI interactive :
   * Supporte **Ad-hoc File Injection** via `-f/--file` : `implement [-f file]`.
 * `test_ai` : envoie une requête minimale à l’IA (sanity check de connectivité).
 * `status` : affiche un état Git rapide du dépôt (changements en attente + dernier commit).
+* `report` : affiche un rapport agrégé (transactions, tokens, coût estimé) basé sur `audit_log.jsonl`.
 * `help` : affiche l’aide.
 * `clear` : efface l’écran via `clear`.
 
@@ -74,7 +112,7 @@ Pour éviter toute confusion sur le projet actif (notamment quand plusieurs proj
 **Prompt CLI (format) :**
 ```
 [<project_root>]
-Command (implement, test_ai, help, clear, exit):
+Command (implement, test_ai, status, report, help, clear, exit):
 ```
 
 Ainsi, le **Project Root** est toujours visible à côté du curseur au point de décision.
@@ -179,6 +217,18 @@ La commande `status` fournit une vue concise de l'état du dépôt.
 2. exécute `git status -s` pour lister les changements en attente,
 3. exécute `git log -1 --format="%h - %s (%cr)"` pour afficher le dernier commit,
 4. si Git n’est pas disponible (ex: binaire absent) ou si la commande échoue (ex: dossier non-initialisé), Albert affiche un message d'erreur **amical** (avec détails techniques optionnels).
+
+#### 2.4.8 Commande `report` (dashboard)
+La commande `report` affiche un tableau de bord agrégé basé sur `audit_log.jsonl`.
+
+**Format (exemple) :**
+```
+--- 📊 Project Report ---
+Total Transactions: X
+Tokens: In: X,xxx / Out: Y,yyy
+Estimated Cost: $Z.ZZZZ
+Ledger File: [path]
+```
 
 ## 2.5 The 'albert' Launcher
 Le projet fournit un script Bash portable `albert` à la racine du dépôt, conçu comme **launcher universel** pour exécuter la CLI sans dépendre du répertoire courant.

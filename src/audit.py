@@ -25,6 +25,7 @@ class AuditLedger:
             self.ledger_file.touch()
 
     def _ensure_audit_log_exists(self):
+        # Keep behavior: ensure file exists for append-only usage.
         if not self.audit_log_file.exists():
             self.audit_log_file.touch()
 
@@ -78,6 +79,90 @@ class AuditLedger:
             f.write(json.dumps(entry) + "\n")
 
         return entry_uuid
+
+    def generate_report(self, timeframe: str = "all") -> dict:
+        """Generate an aggregated financial & operational report from audit_log.jsonl.
+
+        Timeframes:
+          - 'session': current session (YYYY-MM-DD) entries
+          - 'today'  : same as session (today's date) for now
+          - 'all'    : all entries
+
+        Aggregates:
+          - total_requests (transactions)
+          - total_input_tokens  (sum of prompt_tokens)
+          - total_output_tokens (sum of completion_tokens)
+          - estimated_cost_usd (computed from GLOBAL_CONFIG.PRICING_RATES)
+
+        Must handle missing/empty ledger files gracefully (returns zeros).
+        """
+        tf = (timeframe or "all").strip().lower()
+        if tf not in {"session", "today", "all"}:
+            tf = "all"
+
+        # Determine filter date for 'session'/'today'
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        totals = {
+            "timeframe": tf,
+            "total_requests": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "estimated_cost_usd": 0.0,
+            "pricing_rates": dict(getattr(GLOBAL_CONFIG, "PRICING_RATES", {}) or {}),
+            "ledger_file": str(self.audit_log_file),
+        }
+
+        # If file missing, return zeros
+        try:
+            if not self.audit_log_file.exists():
+                return totals
+        except Exception:
+            return totals
+
+        # Read JSONL lines
+        try:
+            with open(self.audit_log_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except Exception:
+            return totals
+
+        if not lines:
+            return totals
+
+        input_rate = float(totals["pricing_rates"].get("input_per_1m", 0.0) or 0.0)
+        output_rate = float(totals["pricing_rates"].get("output_per_1m", 0.0) or 0.0)
+
+        for line in lines:
+            line = (line or "").strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except Exception:
+                # Skip malformed lines rather than crashing reporting
+                continue
+
+            # Timeframe filter
+            if tf in {"session", "today"}:
+                session_id = str(entry.get("session_id", "") or "")
+                if session_id != today:
+                    continue
+
+            usage = entry.get("usage_stats") or {}
+            pt = int(usage.get("prompt_tokens", 0) or 0)
+            ct = int(usage.get("completion_tokens", 0) or 0)
+
+            totals["total_requests"] += 1
+            totals["total_input_tokens"] += pt
+            totals["total_output_tokens"] += ct
+
+        # Cost computation
+        in_cost = (totals["total_input_tokens"] / 1_000_000.0) * input_rate
+        out_cost = (totals["total_output_tokens"] / 1_000_000.0) * output_rate
+        totals["estimated_cost_usd"] = float(in_cost + out_cost)
+
+        return totals
 
 
 # Instance globale

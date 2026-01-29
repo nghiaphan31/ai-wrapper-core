@@ -15,6 +15,14 @@ class ConfigLoader:
         self.project_file = self.project_root / "project.json"
         self.config = self._load_config()
 
+        # Centralized pricing rates (USD per 1M tokens)
+        # Default values correspond to GPT-4o tier (or current standard rates).
+        # NOTE: This is an operational estimate used for local visibility, not billing.
+        self.PRICING_RATES = {
+            "input_per_1m": 2.50,
+            "output_per_1m": 10.00,
+        }
+
     def _load_config(self) -> dict:
         """Charge le fichier project.json strict."""
         if not self.project_file.exists():

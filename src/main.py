@@ -268,20 +268,48 @@ def _cmd_status() -> None:
 
 
 def _estimate_cost_usd(usage_stats: dict) -> tuple[float, float, float]:
-    """Estimate USD cost based on token usage.
+    """Estimate USD cost based on token usage using centralized pricing.
 
-    Pricing assumptions (as requested):
-      - $3.00 / 1M input tokens
-      - $15.00 / 1M output tokens
+    Uses GLOBAL_CONFIG.PRICING_RATES:
+      - input_per_1m
+      - output_per_1m
 
     Returns (input_cost, output_cost, total_cost).
     """
     prompt_tokens = int((usage_stats or {}).get("prompt_tokens", 0) or 0)
     completion_tokens = int((usage_stats or {}).get("completion_tokens", 0) or 0)
 
-    in_cost = (prompt_tokens / 1_000_000.0) * 3.00
-    out_cost = (completion_tokens / 1_000_000.0) * 15.00
+    rates = getattr(GLOBAL_CONFIG, "PRICING_RATES", {}) or {}
+    input_rate = float(rates.get("input_per_1m", 0.0) or 0.0)
+    output_rate = float(rates.get("output_per_1m", 0.0) or 0.0)
+
+    in_cost = (prompt_tokens / 1_000_000.0) * input_rate
+    out_cost = (completion_tokens / 1_000_000.0) * output_rate
     return in_cost, out_cost, (in_cost + out_cost)
+
+
+def _format_int(n: int) -> str:
+    try:
+        return f"{int(n):,}"
+    except Exception:
+        return str(n)
+
+
+def _cmd_report() -> None:
+    """Display a clean financial & operational dashboard based on audit_log.jsonl."""
+    report = GLOBAL_LEDGER.generate_report("all")
+
+    total_tx = int(report.get("total_requests", 0) or 0)
+    in_tok = int(report.get("total_input_tokens", 0) or 0)
+    out_tok = int(report.get("total_output_tokens", 0) or 0)
+    cost = float(report.get("estimated_cost_usd", 0.0) or 0.0)
+    ledger_file = str(report.get("ledger_file", "audit_log.jsonl"))
+
+    GLOBAL_CONSOLE.print("--- 📊 Project Report ---")
+    GLOBAL_CONSOLE.print(f"Total Transactions: {total_tx}")
+    GLOBAL_CONSOLE.print(f"Tokens: In: {_format_int(in_tok)} / Out: {_format_int(out_tok)}")
+    GLOBAL_CONSOLE.print(f"Estimated Cost: ${cost:.6f}")
+    GLOBAL_CONSOLE.print(f"Ledger File: {ledger_file}")
 
 
 def _print_help():
@@ -289,6 +317,7 @@ def _print_help():
     GLOBAL_CONSOLE.print("  implement [-f file] - Execute an implementation task based on instructions")
     GLOBAL_CONSOLE.print("  test_ai             - Send a minimal test request to the AI")
     GLOBAL_CONSOLE.print("  status              - Show git working tree status and last commit")
+    GLOBAL_CONSOLE.print("  report              - Show aggregated tokens and estimated cost (from audit_log.jsonl)")
     GLOBAL_CONSOLE.print("  clear               - Clear the terminal screen")
     GLOBAL_CONSOLE.print("  help                - Show this help message")
     GLOBAL_CONSOLE.print("  exit                - Quit the CLI")
@@ -380,7 +409,7 @@ def main():
         while True:
             # Persistent project root context at decision point
             user_input = GLOBAL_CONSOLE.input(
-                f"[{GLOBAL_CONFIG.project_root}]\nCommand (implement, test_ai, help, clear, exit): "
+                f"[{GLOBAL_CONFIG.project_root}]\nCommand (implement, test_ai, status, report, help, clear, exit): "
             )
 
             # Use shlex to handle quoted strings and flags correctly
@@ -406,6 +435,9 @@ def main():
 
             elif cmd == "status":
                 _cmd_status()
+
+            elif cmd == "report":
+                _cmd_report()
 
             elif cmd == "test_ai":
                 if not client:
