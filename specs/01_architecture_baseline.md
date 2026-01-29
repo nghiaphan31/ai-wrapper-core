@@ -148,7 +148,61 @@ Pour prévenir toute perte d'information ou hallucination non détectée, le log
     * payload_ref : Lien vers le fichier brut stocké dans sessions/raw_exchanges/ (pour ne pas alourdir le ledger avec le contenu complet).
     * artifacts_links : Liste des chemins vers les fichiers créés ou modifiés (ex: artifacts/step_04/script.py).
 
-**10.3 Intégrité**
+### 10.3 Unified Traceability Model (The 6-W Framework)
+Cette section formalise un **modèle unifié de traçabilité** : des sources de données distinctes (transcript, raw exchanges, artefacts, manifests, ledgers) forment un **graphe cohérent** permettant de répondre à des questions de type “Time Machine”, par exemple :
+
+* *Qui* a demandé ce changement ?
+* *Quand* a-t-il été demandé et appliqué ?
+* *Quoi* exactement a été demandé, reçu, puis écrit sur disque ?
+* *Où* se trouve la preuve (staging vs production) ?
+* *Comment* relier un fichier final à l’échange IA et à sa preuve d’intégrité ?
+* *Pourquoi* ce fichier a été écrit (instruction ↔ action) ?
+
+Le principe directeur est le **Golden Thread** : chaque production (artifact) doit pouvoir être reliée sans ambiguïté à l’instruction utilisateur, à l’échange brut IA, aux écritures de fichiers, et à une preuve d’intégrité (hash), via des identifiants et des références croisées.
+
+#### WHO (Qui)
+* **Source principale :** transcript console (`src/console.py` → `sessions/<YYYY-MM-DD>/transcript.log`).
+* **Source transactionnelle :** `audit_log.jsonl`.
+* **Lien attendu :** **User ID** (ou identifiant opérateur) doit être transporté/associé à la transaction. À défaut, l’identité est prouvée par le transcript (contexte terminal) et l’environnement d’exécution.
+
+#### WHEN (Quand)
+* **Sessions datées :** `sessions/<YYYY-MM-DD>/...` (dossier de session) fournit le découpage temporel.
+* **Horodatage ledger :** `ledger/events.jsonl` contient des `timestamp_utc` pour chaque événement.
+* **Lien attendu :** la date de session + timestamps ledger permettent de reconstruire une chronologie robuste (sans dépendre des timestamps filesystem).
+
+#### WHAT (Quoi)
+* **Intent (instruction) :** `transcript.txt` / `transcript.log` contient la commande et l’instruction utilisateur.
+* **Raw Data (échanges bruts IA) :** `sessions/.../raw_exchanges/` contient les payloads complets requête/réponse API.
+* **Result (production) :** `artifacts/step_TIMESTAMP_ID/` contient les fichiers générés (staging).
+
+#### WHERE (Où)
+* **Staging (non versionné) :** `artifacts/` (propositions IA, preuves de génération, bundles).
+* **Production (versionné) :** `src/` (livrable final, sous Git).
+
+Ce découplage garantit que les sorties IA sont isolées tant qu’elles ne sont pas validées.
+
+#### HOW (Comment relier les preuves)
+Le graphe est reconstruit via trois liens structurants :
+
+1) **Session ID** : relie Transcript ↔ Raw Exchanges
+   * la session (souvent `YYYY-MM-DD`) scope les fichiers : `sessions/<session_id>/transcript.log` et `sessions/<session_id>/raw_exchanges/...`.
+
+2) **Step ID** : relie Raw Exchange ↔ Artifact Folder
+   * chaque exécution produit un dossier `artifacts/step_YYYYMMDD_HHMMSS_<short_id>/`.
+   * le Step ID sert d’ancre pour associer une génération à un ensemble de fichiers.
+
+3) **SHA-256** : relie Artifact ↔ Manifest ↔ Ledger
+   * chaque fichier produit hors Git doit être haché en SHA-256 et inscrit dans un **manifest** (`manifests/`).
+   * le manifest sert de preuve d’intégrité, réconciliable avec un export/backup externe.
+   * le ledger (événementiel et/ou transactionnel) référence les chemins et permet de prouver l’existence d’une action d’écriture.
+
+#### WHY (Pourquoi)
+* **Source :** `ledger/events.jsonl`.
+* **Lien attendu :** un événement `file_write` (action) doit pouvoir être relié au prompt/instruction (cause) via les identifiants de session/step et/ou une référence au payload brut.
+
+Objectif : prouver que “ce fichier a été écrit **parce que** cette instruction a été donnée”, et non par une action implicite/non tracée.
+
+**10.4 Intégrité**
 * Les logs sont en mode "Append-Only".
 * Le wrapper doit fournir un moyen simple de retrouver l'échange IA exact (le JSON brut envoyé et reçu) correspondant à une commande utilisateur donnée.
 
@@ -297,6 +351,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_AUDIT_013 | AUDIT | `payload_ref` DOIT pointer vers le JSON brut dans `sessions/raw_exchanges/` pour éviter d’alourdir le ledger. | P0 |
 | REQ_AUDIT_014 | AUDIT | Intégrité logs : les logs DOIVENT être en mode Append-Only. | P0 |
 | REQ_AUDIT_015 | AUDIT | Le wrapper DOIT fournir un moyen simple de retrouver l’échange IA exact (JSON brut envoyé/reçu) correspondant à une commande utilisateur donnée. | P0 |
+| REQ_AUDIT_030 | AUDIT | **Traceability Graph :** The system MUST ensure that every artifact produced can be traced back to the specific user prompt (Session/Step ID) and validated against its original integrity hash (Manifest) without gaps. | P0 |
 | REQ_UX_005 | UX | UX attendue : commande simple “appeler l’IA” sur une entrée structurée. | P1 |
 | REQ_UX_006 | UX | UX attendue : possibilité de relancer avec resume pack. | P1 |
 | REQ_UX_007 | UX | UX attendue : sorties concises + génération d’artefacts lisibles. | P0 |
@@ -319,7 +374,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_DATA_020 | DATA | Critère d’acceptation : le code développé (source) DOIT être isolé dans `src/` versionné. | P0 |
 | REQ_DATA_021 | DATA | Critère d’acceptation : le `.gitignore` DOIT être généré en mode strict (whitelist). | P0 |
 | REQ_DATA_022 | DATA | Critère d’acceptation : toute modification de code DOIT s’accompagner d’une mise à jour de la documentation d’implémentation. | P0 |
-| REQ_UX_016 | UX | Critère d’acceptation : l’utilisateur DOIT pouvoir attacher un ou plusieurs fichiers locaux ; le wrapper DOIT les lire au runtime et injecter leur contenu comme Transient Context distinct du Project Context. | P0 |
+| REQ_UX_016 | UX | Critère d’acceptation : l’utilisateur DOIT pouvoir attacher un ou plusieurs fichiers locaux ; le wrapper DOIT les lire au runtime et injecte leur contenu comme Transient Context distinct du Project Context. | P0 |
 | REQ_UX_017 | UX | **(Ghost Feature GF-002) Interactive Review :** le système DOIT présenter un unified diff et exiger une confirmation explicite **par fichier** avant d’appliquer des changements. | P0 |
 | REQ_DATA_025 | DATA | **(Ghost Feature GF-001) Audit Ledger :** le système DOIT maintenir un ledger transactionnel au niveau opération (`audit_log.jsonl`) pour tracer coûts et statut des opérations, distinct du ledger événementiel. | P0 |
 | REQ_UX_018 | UX | **(Ghost Feature GF-005) Editor Integration :** le système DOIT supporter la saisie multi-ligne via un éditeur externe (ex: Nano) pour des instructions complexes. | P1 |
