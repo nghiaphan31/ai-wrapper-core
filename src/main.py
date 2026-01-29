@@ -45,6 +45,40 @@ NOTE: If updating an existing file found in context, provide the FULL new conten
 """
 
 
+def _echo_external_editor_input_to_console_and_transcript(content: str) -> None:
+    """Echo external editor input into the normal console/log stream.
+
+    REQ_AUDIT_031 (External Input Echo): Any input captured via an external editor
+    MUST be explicitly echoed to the console transcript immediately upon capture,
+    so transcript reconstruction does not require guessing what was typed in Nano.
+
+    Output format:
+      [USER_INPUT_ECHO]
+      > line 1
+      > line 2
+      [END_INPUT]
+
+    Notes:
+      - Uses GLOBAL_CONSOLE.print so it is guaranteed to land in sessions/<date>/transcript.log.
+      - Preserves empty input as an explicit empty block.
+    """
+    text = content if content is not None else ""
+    # Normalize line endings for stable transcript rendering
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    GLOBAL_CONSOLE.print("[USER_INPUT_ECHO]")
+
+    if text == "":
+        # Explicitly record emptiness (still reconstructable)
+        GLOBAL_CONSOLE.print(">")
+    else:
+        for line in text.split("\n"):
+            # Keep exact lines; do not strip trailing spaces (but split() already drops \n)
+            GLOBAL_CONSOLE.print(f"> {line}")
+
+    GLOBAL_CONSOLE.print("[END_INPUT]")
+
+
 def get_input_from_editor(prompt_text: str) -> str:
     """Collect multi-line user input by opening nano on a temporary file.
 
@@ -52,7 +86,8 @@ def get_input_from_editor(prompt_text: str) -> str:
       1) Create a NamedTemporaryFile
       2) Open nano so the user can type freely
       3) Read back the file content
-      4) Delete the temp file
+      4) Echo content into transcript immediately (REQ_AUDIT_031)
+      5) Delete the temp file
 
     Returns the full text (may be empty if user saved nothing).
     """
@@ -76,7 +111,12 @@ def get_input_from_editor(prompt_text: str) -> str:
 
         # Read back content
         with open(tf_path, "r", encoding="utf-8") as f:
-            return f.read()
+            content = f.read()
+
+        # CRITICAL (REQ_AUDIT_031): immediately echo external editor input into transcript
+        _echo_external_editor_input_to_console_and_transcript(content)
+
+        return content
 
     finally:
         if tf_path:

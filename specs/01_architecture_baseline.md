@@ -98,7 +98,7 @@ Avant de payer des tokens, le wrapper doit privilégier la recherche texte local
 * Règle d'Or (Phase B) : Toute proposition de code (src/) DOIT être accompagnée de sa documentation technique (impl-docs/). Le wrapper signale tout manquement.
 
 **6.4 Bundle de preuves**
-Production d'un bundle (résumé, logs, diffs, erreurs) à chaque exécution locale pour feedback à l'IA.
+Production d'un bundle (résumé, logs, diffs, erreurs) à chaque exécution locale pour feedback à l’IA.
 
 ## 7) Sécurité d’exécution (garde-fous)
 Principe fondateur : le wrapper peut proposer des commandes/scripts, mais l’exécution réelle doit rester contrôlée.
@@ -352,6 +352,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_AUDIT_014 | AUDIT | Intégrité logs : les logs DOIVENT être en mode Append-Only. | P0 |
 | REQ_AUDIT_015 | AUDIT | Le wrapper DOIT fournir un moyen simple de retrouver l’échange IA exact (JSON brut envoyé/reçu) correspondant à une commande utilisateur donnée. | P0 |
 | REQ_AUDIT_030 | AUDIT | **Traceability Graph :** The system MUST ensure that every artifact produced can be traced back to the specific user prompt (Session/Step ID) and validated against its original integrity hash (Manifest) without gaps. | P0 |
+| REQ_AUDIT_031 | Audit | **External Input Echo :** Any input captured via an external editor (e.g., Nano) MUST be explicitly echoed to the console transcript and audit logs immediately upon capture. This ensures the user's intent is recorded in the history. | P0 |
 | REQ_UX_005 | UX | UX attendue : commande simple “appeler l’IA” sur une entrée structurée. | P1 |
 | REQ_UX_006 | UX | UX attendue : possibilité de relancer avec resume pack. | P1 |
 | REQ_UX_007 | UX | UX attendue : sorties concises + génération d’artefacts lisibles. | P0 |
@@ -363,7 +364,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_UX_013 | UX | (Reprise exacte REQ-AFI-002) Le wrapper DOIT lire le contenu des fichiers attachés au runtime et l’injecter dans le prompt en tant que Transient Context, clairement séparé du Project Context, avec délimiteurs incluant au minimum chemin/identifiant + contenu brut. | P0 |
 | REQ_UX_014 | UX | (Reprise exacte REQ-AFI-003) Les fichiers ad-hoc NE DOIVENT PAS être intégrés automatiquement au Project Context (pas de copie par défaut vers `specs/`, `impl-docs/`, `src/`, `notes/`) ; ils DOIVENT être traités comme éphémères. | P0 |
 | REQ_UX_015 | UX | (Reprise exacte REQ-AFI-004) Le mécanisme DOIT permettre analyse/debug/réécriture on-the-fly de documents/logs/config/scripts sans copier-coller manuel dans le terminal. | P0 |
-| REQ_CORE_019 | CORE | Critère d’acceptation : l’IA DOIT refuser d’écrire du code (`src`) si on est en phase de définition (`specs`). | P0 |
+| REQ_CORE_019 | CORE | Critère d’acceptation : l’IA DOIT refuser d'écrire du code (`src`) si on est en phase de définition (`specs`). | P0 |
 | REQ_AUDIT_016 | AUDIT | Critère d’acceptation : on DOIT pouvoir créer une session, appeler l’IA, et retrouver prompt, réponse brute, resume pack mis à jour, ledger événementiel. | P0 |
 | REQ_AUDIT_017 | AUDIT | Critère d’acceptation : l’utilisateur DOIT pouvoir prouver via `transcript.log` ce qu’il a demandé et le comparer au JSON brut de la réponse IA lié dans le ledger. | P0 |
 | REQ_CORE_020 | CORE | Critère d’acceptation : intégrité code “zéro copy-paste” — le code dans `artifacts/` DOIT être strictement identique au code reçu dans la réponse JSON de l'IA. | P0 |
