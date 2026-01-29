@@ -51,5 +51,12 @@ La commande `gen_code` supporte désormais une saisie multi-ligne via **Nano Int
 
 > Note : cette intégration suppose que `nano` est disponible sur le système.
 
+### 2.5 The Universal Launcher (ai script)
+Le projet fournit un script Bash portable `ai` à la racine du dépôt, conçu comme **launcher universel** pour exécuter la CLI sans dépendre du répertoire courant.
+
+* **Portabilité & “symlink-proof” :** le script résout son propre chemin réel via `realpath`, ce qui garantit un comportement correct même si `ai` est appelé via un lien symbolique.
+* **Résolution automatique de la racine :** à partir de ce chemin résolu, il déduit la racine du projet, active automatiquement l’environnement virtuel `.venv`, puis lance la CLI via `src.main`.
+* **Appel global possible :** si `ai` est lié dans le PATH (par exemple via un symlink vers `/usr/local/bin/ai`), la commande `ai` devient utilisable globalement, tout en pointant toujours vers la bonne racine projet.
+
 ## 3. Structure des Données
 Les sessions sont isolées par date. Le Ledger est global au projet.

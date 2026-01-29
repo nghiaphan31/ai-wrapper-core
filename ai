@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve symlinks and compute the physical project root (directory containing this script)
+PROJECT_ROOT="$(dirname "$(realpath "$0")")"
+
+# Ensure python runs INSIDE the project folder so it can find the 'src' module
+cd "$PROJECT_ROOT" || exit
+
+# Activate the venv
+source .venv/bin/activate
+
+# Run the project entrypoint as a module
+exec python3 -m src.main "$@"
