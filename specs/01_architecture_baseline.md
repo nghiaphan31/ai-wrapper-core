@@ -152,6 +152,38 @@ Sans figer l’implémentation, l’expérience attendue :
 * sorties concises + génération d’artefacts lisibles,
 * mode “rapport” (coût, état projet, derniers steps).
 
+### 11.1 Gestion du contexte : Project Context vs Transient Context
+Le wrapper distingue formellement deux catégories de contexte injectées au modèle :
+
+* **Project Context (persistant)** : contexte stable rattaché au projet (ex: specs/, impl-docs/, src/, notes/). Il est construit par le wrapper (resume pack) et sert de base de travail.
+* **Transient Context (éphémère)** : contexte fourni “à la volée” par l’utilisateur pour une requête unique. Il ne modifie pas la mémoire long-terme du projet et n’est pas supposé être persisté dans les fichiers versionnés.
+
+#### 11.1.1 Capacité : Ad-hoc File Ingestion (Exigence)
+**But :** permettre à l’utilisateur de demander à l’IA d’analyser, débugger ou réécrire un document/log fourni au moment de l’appel, sans l’intégrer au Project Context persistant.
+
+**Exigence (REQ-AFI-001) — Attachement explicite de fichiers locaux :**
+* La CLI DOIT permettre à l’utilisateur d’attacher explicitement un ou plusieurs fichiers locaux à une requête (ex: via un ou plusieurs arguments de type chemin de fichier).
+
+**Comportement système (REQ-AFI-002) — Lecture runtime et injection en Transient Context :**
+* Le wrapper DOIT lire le contenu des fichiers attachés **au runtime** (au moment de l’exécution de la commande).
+* Le contenu lu DOIT être injecté dans le prompt en tant que **Transient Context**, clairement séparé du Project Context.
+* Le wrapper DOIT encapsuler chaque fichier ad-hoc avec des délimiteurs explicites incluant au minimum :
+  * le chemin fourni (ou un identifiant),
+  * le contenu brut,
+  afin de permettre au modèle de distinguer les sources.
+
+**Séparation et non-persistance (REQ-AFI-003) — Distinct du Project Context :**
+* Les fichiers ad-hoc NE DOIVENT PAS être intégrés automatiquement au Project Context (ex: ne pas les copier dans specs/, impl-docs/, src/ ou notes/ par défaut).
+* Le wrapper DOIT traiter ces fichiers comme éphémères pour la requête courante.
+
+**Cas d’usage (REQ-AFI-004) — Analyse / debug / réécriture on-the-fly :**
+* Le mécanisme DOIT permettre à l’utilisateur de :
+  * soumettre un log, un document, un fichier de configuration, un script isolé, etc.,
+  * demander une analyse, un diagnostic, ou une réécriture ciblée,
+  * sans nécessiter de copier-coller manuel dans le terminal.
+
+> Note : La journalisation (transcript/ledger) reste applicable à l’opération (ex: mention des chemins attachés). Le traitement exact des contenus (stockage brut ou référence uniquement) est une décision d’implémentation ultérieure ; la baseline impose ici la capacité et la séparation conceptuelle Project vs Transient.
+
 ## 12) Critères d’acceptation (pré-code)
 Le wrapper est conforme au baseline si, pour un projet donné :
 * L'IA refuse d'écrire du code (src) si on est en phase de définition (specs).
@@ -165,6 +197,7 @@ Le wrapper est conforme au baseline si, pour un projet donné :
 * Le code développé (source) est clairement isolé dans un dossier src/ versionné.
 * Le .gitignore est généré en mode strict (whitelist).
 * Toute modification de code s'accompagne d'une mise à jour de la documentation d'implémentation.
+* **Ad-hoc File Ingestion :** l’utilisateur peut attacher un ou plusieurs fichiers locaux à une requête ; le wrapper lit ces fichiers au runtime et injecte leur contenu comme **Transient Context**, distinct du Project Context persistant.
 
 ## 13) Analyse de Cohérence & Matrice de Couverture
 Cette section évalue l'alignement entre les solutions techniques spécifiées et les objectifs initiaux. Elle doit être mise à jour à chaque révision des objectifs ou de l'architecture.
