@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import difflib
 import shutil
+import shlex
 from datetime import datetime
 from pathlib import Path
 from src.config import GLOBAL_CONFIG
@@ -285,12 +286,80 @@ def _estimate_cost_usd(usage_stats: dict) -> tuple[float, float, float]:
 
 def _print_help():
     GLOBAL_CONSOLE.print("Available Albert commands:")
-    GLOBAL_CONSOLE.print("  implement - Execute an implementation task based on instructions")
-    GLOBAL_CONSOLE.print("  test_ai   - Send a minimal test request to the AI")
-    GLOBAL_CONSOLE.print("  status    - Show git working tree status and last commit")
-    GLOBAL_CONSOLE.print("  clear     - Clear the terminal screen")
-    GLOBAL_CONSOLE.print("  help      - Show this help message")
-    GLOBAL_CONSOLE.print("  exit      - Quit the CLI")
+    GLOBAL_CONSOLE.print("  implement [-f file] - Execute an implementation task based on instructions")
+    GLOBAL_CONSOLE.print("  test_ai             - Send a minimal test request to the AI")
+    GLOBAL_CONSOLE.print("  status              - Show git working tree status and last commit")
+    GLOBAL_CONSOLE.print("  clear               - Clear the terminal screen")
+    GLOBAL_CONSOLE.print("  help                - Show this help message")
+    GLOBAL_CONSOLE.print("  exit                - Quit the CLI")
+
+
+def _extract_attached_files(tokens: list[str]) -> list[str]:
+    """Extract file paths passed via -f/--file from a tokenized command line.
+
+    Supported forms:
+      - implement -f path/to/file
+      - implement --file path/to/file
+      - implement -f path1 -f path2
+
+    Returns list of paths as provided (strings). Unknown flags are ignored.
+    """
+    attached: list[str] = []
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t in {"-f", "--file"}:
+            if i + 1 < len(tokens):
+                attached.append(tokens[i + 1])
+                i += 2
+                continue
+            else:
+                # Missing value; caller can decide how to handle.
+                attached.append("")
+                i += 1
+                continue
+        i += 1
+    # Remove empties (invalid) while keeping order
+    return [p for p in attached if p]
+
+
+def _build_adhoc_file_injection(file_paths: list[str]) -> tuple[str, list[str], bool]:
+    """Read attached files and build the transient injection block.
+
+    Returns:
+      (injection_text, attached_display_names, ok)
+
+    - injection_text: formatted per spec with delimiters.
+    - attached_display_names: list of filenames/paths confirmed to user.
+    - ok: False if a critical error should abort the implement flow.
+
+    Behavior:
+      - FileNotFoundError: prints error and aborts (ok=False) to avoid silent partial context.
+      - Other read errors: prints error and aborts.
+    """
+    if not file_paths:
+        return "", [], True
+
+    injection_parts: list[str] = []
+    attached_names: list[str] = []
+
+    for fp in file_paths:
+        p = Path(fp)
+        try:
+            content = p.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            GLOBAL_CONSOLE.error(f"Attached file not found: {fp}")
+            return "", attached_names, False
+        except Exception as e:
+            GLOBAL_CONSOLE.error(f"Failed to read attached file '{fp}': {e}")
+            return "", attached_names, False
+
+        attached_names.append(str(fp))
+        GLOBAL_CONSOLE.print(f"📎 Attached: {p.name}")
+
+        injection_parts.append(f"\n\n--- ATTACHED FILE: {fp} ---\n{content}\n")
+
+    return "".join(injection_parts), attached_names, True
 
 
 def main():
@@ -313,7 +382,18 @@ def main():
             user_input = GLOBAL_CONSOLE.input(
                 f"[{GLOBAL_CONFIG.project_root}]\nCommand (implement, test_ai, help, clear, exit): "
             )
-            cmd = user_input.strip().lower()
+
+            # Use shlex to handle quoted strings and flags correctly
+            try:
+                tokens = shlex.split(user_input)
+            except ValueError as e:
+                GLOBAL_CONSOLE.error(f"Failed to parse command: {e}")
+                continue
+
+            if not tokens:
+                continue
+
+            cmd = tokens[0].strip().lower()
 
             if cmd in ["exit", "quit"]:
                 break
@@ -336,6 +416,13 @@ def main():
                 if not client:
                     client = AIClient()
 
+                # Parse ad-hoc file attachments from the original command line
+                file_paths = _extract_attached_files(tokens[1:])
+                injection_text, _attached, ok = _build_adhoc_file_injection(file_paths)
+                if not ok:
+                    GLOBAL_CONSOLE.print("❌ Action cancelled: one or more attached files could not be read.")
+                    continue
+
                 # 1. Saisie du besoin (multi-line via nano)
                 instruction = get_input_from_editor("Describe the implementation task")
 
@@ -343,6 +430,10 @@ def main():
                 if not instruction.strip():
                     GLOBAL_CONSOLE.print("❌ Action cancelled: Empty instruction.")
                     continue
+
+                # Append transient context (ad-hoc files) for this request only
+                if injection_text:
+                    instruction = f"{instruction.rstrip()}\n\n{injection_text.lstrip()}"
 
                 # Session/Step identity (for traceability)
                 session_id = datetime.now().strftime("%Y-%m-%d")
@@ -425,10 +516,6 @@ def main():
 
                 else:
                     GLOBAL_CONSOLE.error("No files generated.")
-
-            elif cmd == "":
-                # Ignore empty input
-                continue
 
             else:
                 GLOBAL_CONSOLE.error("Unknown command. Type 'help' to see available commands.")

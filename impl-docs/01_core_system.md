@@ -60,6 +60,7 @@ En plus du ledger événementiel (machine-level), Albert maintient désormais un
 #### 2.4.1 Commandes interactives
 Commandes disponibles dans la CLI interactive :
 * `implement` : exécute une tâche d’implémentation via l’IA et écrit les fichiers dans `artifacts/<step_id>/`.
+  * Supporte **Ad-hoc File Injection** via `-f/--file` : `implement [-f file]`.
 * `test_ai` : envoie une requête minimale à l’IA (sanity check de connectivité).
 * `status` : affiche un état Git rapide du dépôt (changements en attente + dernier commit).
 * `help` : affiche l’aide.
@@ -101,7 +102,31 @@ Le wrapper applique une politique **Zero Waste** sur `implement` :
 
 Cela évite de consommer des tokens et du temps sur des invocations accidentelles.
 
-#### 2.4.5 Interactive Review Mode (Diff View + Validation Atomique)
+#### 2.4.5 Ad-hoc File Injection (Transient Context via `-f/--file`)
+Albert supporte l’injection de fichiers locaux **à la volée** pour une requête `implement`, sans copier-coller dans le terminal.
+
+**Syntaxe :**
+* `implement -f path/to/file`
+* `implement -f file1 -f file2`
+* `implement --file path/to/file`
+
+**Comportement :**
+1. Le wrapper lit les fichiers attachés **au runtime** (au moment de l’exécution de la commande).
+2. Le contenu est injecté dans l’instruction envoyée au modèle en tant que **Transient Context**.
+3. Chaque fichier est encapsulé avec un délimiteur explicite :
+
+```
+--- ATTACHED FILE: <filename> ---
+<content>
+```
+
+4. Le wrapper affiche une confirmation par fichier (ex: `📎 Attached: error.log`).
+
+**Propriété clé (non-persistance) :**
+* Ce mécanisme injecte du contexte **uniquement pour la requête courante**.
+* Les fichiers attachés ne sont **pas** copiés automatiquement dans `specs/`, `impl-docs/`, `src/` ou `notes/`.
+
+#### 2.4.6 Interactive Review Mode (Diff View + Validation Atomique)
 La commande `implement` inclut désormais un **Interactive Review Mode** qui sert de garde-fou avant d’impacter le dépôt Git.
 
 **Objectif :** transformer l’étape “validation humaine” en une validation **explicite, visuelle et atomique**, basée sur une vue diff.
@@ -146,7 +171,7 @@ Si (et seulement si) la revue interactive est validée pour **tous** les fichier
 
 > Note importante : l’affichage diff et la validation atomique constituent la barrière de sécurité qui autorise ensuite l’auto-merge/auto-push.
 
-#### 2.4.6 Commande `status` (état Git rapide)
+#### 2.4.7 Commande `status` (état Git rapide)
 La commande `status` fournit une vue concise de l'état du dépôt.
 
 **Comportement :**
