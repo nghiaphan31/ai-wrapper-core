@@ -5,7 +5,8 @@ Un wrapper local Linux (fonctionnant sur une machine unique : NUC ou Calypso) qu
 * produire/itérer du code (bash, python),
 * gérer le cycle de vie dual de la documentation : spécifications techniques versionnées vs documentation d'implémentation continue,
 * générer/manipuler des artefacts (fichiers, images, bundles),
-tout en garantissant : traçabilité, reproductibilité, maîtrise des coûts, sécurité d’exécution.
+
+ tout en garantissant : traçabilité, reproductibilité, maîtrise des coûts, sécurité d’exécution.
 
 ## 2) Contraintes & postulats (cadrage)
 * Environnement : Linux, usage “local-first”.
@@ -30,7 +31,8 @@ Non-objectif (pré-code) : gérer plusieurs fournisseurs en même temps (même s
 * **Session** : Une session = une séquence de travail datée, rattachée à un projet. Doit produire des artefacts de “reprise” (resume pack) et un journal d’événements.
 * **Step (micro-étape)** : Unité atomique de progression : une modification utile. Chaque step doit avoir : un prompt (intention), une réponse IA, des artefacts, une preuve (diff / logs / extraits), et une traçabilité vers l’état du code (conceptuellement, via Git, mais sans détailler l’exécution).
 * **Ledger event (événement journalisé)** : Enregistrement append-only. Sert à l’audit : qui a demandé quoi, quelle IA, quels coûts, quels fichiers ont été produits, quelles commandes proposées, etc.
-* **Artifact** : Tout fichier produit ou utilisé : code, patch, doc, image, logs, bundles, etc. Chaque artefact doit être stocké et référencé (idéalement via hash et manifest).
+* **Artifact** : Tout fichier produit ou utilisé : code, patch, doc, image, logs, bundles zip, binaires.
+  Chaque artefact doit être stocké et référencé (idéalement via hash et manifest).
 
 ## 5) Stockage local : organisation des dossiers & Stratégie Git
 Le wrapper impose une arborescence de travail simple. Chaque élément a un statut Git défini (Tracked = versionné, Ignored = local uniquement).
@@ -219,3 +221,108 @@ Cette section évalue l'alignement entre les solutions techniques spécifiées e
 * Risque : Désynchronisation Code/Doc. -> Mitigation : "Definition of Done".
 * Risque : Erreurs de copié-collé. -> Mitigation : Automatisé par le wrapper (Sect 6.3).
 * Risque : "Gaslighting" de l'IA. -> Mitigation : Full Traceability (Sect 10).
+
+## 14) Table Synthétique des Exigences
+Cette section formalise un **Requirements Registry** dérivé strictement du contenu des sections 1 à 13. Chaque ligne correspond à une exigence atomique, une contrainte opérationnelle, ou une fonctionnalité explicitement demandée.
+
+**Convention d’ID :**
+* `REQ_CORE_XXX` : workflow, intégration IA, sécurité d’exécution, “core loop”.
+* `REQ_DATA_XXX` : modèle de données, stockage, Git, séparation des dossiers.
+* `REQ_AUDIT_XXX` : journalisation, auditabilité, traçabilité, preuves.
+* `REQ_UX_XXX` : ergonomie terminal, interaction, contexte, modes.
+
+> Note de cohérence : Les exigences Ad-hoc File Ingestion sont déjà définies en prose sous la forme `REQ-AFI-00X` (Sect. 11.1.1). Dans le registre ci-dessous, elles sont reprises **à l’identique** et mappées à la convention globale via des IDs `REQ_UX_0XX` (sans supprimer les IDs existants).
+
+| Req_ID | Catégorie | Description de l'Exigence | Priorité |
+|---|---|---|---|
+| REQ_CORE_001 | CORE | Le wrapper DOIT fonctionner sur Linux en mode “local-first” sur une machine unique (NUC ou Calypso). | P0 |
+| REQ_UX_001 | UX | L’interaction DOIT être orientée projets et sessions datées. | P0 |
+| REQ_UX_002 | UX | Le wrapper DOIT privilégier des sorties courtes, des résumés et des artefacts consultables (contexte “simple écran / confort limité terminal”). | P0 |
+| REQ_CORE_002 | CORE | Le wrapper DOIT être conçu pour un usage API (facturation et accès IA via API distincts des abonnements UI). | P0 |
+| REQ_CORE_003 | CORE | Garantie “Zéro Copy-Paste” : l’utilisateur NE DOIT JAMAIS avoir besoin de copier-coller du code depuis la sortie terminal vers un fichier. | P0 |
+| REQ_CORE_004 | CORE | Le transfert du code généré vers le système de fichiers local DOIT être 100% automatisé par le wrapper pour garantir l’intégrité binaire (indentation, caractères spéciaux). | P0 |
+| REQ_CORE_005 | CORE | Le wrapper DOIT s’appuyer sur une intégration IA unique : OpenAI GPT-5.2 via l’API Responses comme moteur IA unique côté code. | P0 |
+| REQ_CORE_006 | CORE | Le wrapper DOIT permettre de pinner un snapshot explicite de modèle (ex. `gpt-5.2-2025-12-11`) OU d’utiliser un alias de modèle selon la politique projet. | P1 |
+| REQ_CORE_007 | CORE | Non-objectif : le wrapper NE DOIT PAS gérer plusieurs fournisseurs IA en même temps dans la baseline (intégration IA unique figée). | P2 |
+| REQ_DATA_001 | DATA | Un **Project** DOIT avoir une identité stable (slug), une description et des paramètres IA non secrets (modèle, styles, contraintes, budgets). | P0 |
+| REQ_DATA_002 | DATA | Un Project DOIT imposer une structure de documentation duale obligatoire : Spec vs Impl. | P0 |
+| REQ_DATA_003 | DATA | La **Technical Specification** DOIT être un document de référence versionné sous Git ; son évolution DOIT être contrôlée et rigoureuse (commit/diff). | P0 |
+| REQ_DATA_004 | DATA | L’**Implementation Documentation** DOIT être un document vivant reflétant “ce qui est codé” à l’instant T, incluant cartographie de l’implémentation (fonctions, arborescence, logs, ledgers, localisation artefacts). | P0 |
+| REQ_DATA_005 | DATA | Une **Session** DOIT être datée, rattachée à un projet, et DOIT produire des artefacts de reprise (resume pack) et un journal d’événements. | P0 |
+| REQ_DATA_006 | DATA | Un **Step** DOIT être une micro-étape atomique et DOIT contenir : prompt (intention), réponse IA, artefacts, preuve (diff/logs/extraits), et traçabilité vers l’état du code (conceptuellement via Git). | P0 |
+| REQ_AUDIT_001 | AUDIT | Un **Ledger event** DOIT être append-only et servir à l’audit (qui a demandé quoi, quelle IA, quels coûts, quels fichiers produits, quelles commandes proposées, etc.). | P0 |
+| REQ_DATA_007 | DATA | Un **Artifact** (tout fichier produit ou utilisé) DOIT être stocké et référencé (idéalement via hash et manifest). | P1 |
+| REQ_DATA_008 | DATA | Le wrapper DOIT imposer une arborescence racine `~/ai-work/projects/<project_slug>/`. | P1 |
+| REQ_DATA_009 | DATA | Les éléments versionnés DOIVENT inclure : `project.json`, `src/`, `specs/`, `impl-docs/`, `notes/`. | P0 |
+| REQ_DATA_010 | DATA | Les éléments non versionnés DOIVENT inclure : `secrets/`, `sessions/`, `inputs/`, `outputs/`, `artifacts/`, `ledger/`, `manifests/`. | P0 |
+| REQ_DATA_011 | DATA | Le dossier `secrets/` (API Keys, config machine) DOIT être exclu de Git via `.gitignore`. | P0 |
+| REQ_AUDIT_002 | AUDIT | `sessions/` DOIT contenir par session : `transcript.log` (copie intégrale E/S terminal) et `raw_exchanges/` (JSON complets requête/réponse API). | P0 |
+| REQ_DATA_012 | DATA | Règle de versioning : séparation stricte entre code+docs versionnés et données opérationnelles locales (sessions/logs/artefacts). | P0 |
+| REQ_DATA_013 | DATA | Flux de production : l’IA génère des propositions dans `artifacts/` ou `outputs/` ; après validation humaine, les fichiers sont déplacés/mergés dans `src/` et commités. | P0 |
+| REQ_DATA_014 | DATA | Protection Git : le `.gitignore` racine DOIT utiliser une stratégie “Deny All / Allow Specific” (ignorer `*` par défaut et autoriser explicitement uniquement les dossiers versionnés) pour éviter la pollution accidentelle par logs/artefacts. | P0 |
+| REQ_CORE_008 | CORE | Le workflow DOIT être scindé strictement en deux phases : Phase A (Définition & Spécification) et Phase B (Implémentation & Itération). | P0 |
+| REQ_CORE_009 | CORE | Phase A : l’IA agit comme Architecte/Business Analyst ; la sortie DOIT être des fichiers Markdown dans `specs/`. | P0 |
+| REQ_CORE_010 | CORE | Phase A : il est INTERDIT d’écrire du code dans `src/` ou `impl-docs/`. | P0 |
+| REQ_DATA_015 | DATA | Phase A : livrable de fin de phase = un commit Git validé sur `specs/` (Baseline). | P0 |
+| REQ_CORE_011 | CORE | Phase B : l’IA agit comme Développeur Senior ; elle génère code + doc dans `artifacts/` ; le wrapper/humain teste/itère sans polluer `src/`. | P0 |
+| REQ_DATA_016 | DATA | Phase B : output final = commit Git sur `src/` et `impl-docs/`. | P0 |
+| REQ_CORE_012 | CORE | Réduction de tokens : le wrapper NE DOIT PAS renvoyer “toute la conversation” ; il DOIT construire un resume pack systématique adapté à la phase. | P0 |
+| REQ_CORE_013 | CORE | Avant appel IA, le wrapper DOIT privilégier la recherche texte locale et l’extraction ciblée (RAG “cheap”) pour éviter de payer des tokens inutilement. | P1 |
+| REQ_CORE_014 | CORE | Anti Copy-Paste : le wrapper DOIT parser la réponse JSON de l’IA et écrire les fichiers directement sur disque dans `artifacts/`. | P0 |
+| REQ_CORE_015 | CORE | Gestion différentielle : le système DOIT supporter des mises à jour partielles (patches) pour les fichiers de contexte. | P1 |
+| REQ_DATA_017 | DATA | Règle d’Or Phase B : toute proposition de code (`src/`) DOIT être accompagnée de la documentation technique correspondante (`impl-docs/`) ; le wrapper signale tout manquement. | P0 |
+| REQ_AUDIT_003 | AUDIT | Un bundle de preuves (résumé, logs, diffs, erreurs) DOIT être produit à chaque exécution locale pour feedback à l’IA. | P1 |
+| REQ_CORE_016 | CORE | Sécurité d’exécution : le wrapper peut proposer des commandes/scripts, mais l’exécution réelle DOIT rester contrôlée (validation explicite). | P0 |
+| REQ_AUDIT_004 | AUDIT | Toute commande/script proposé(e) DOIT être enregistré(e) dans les artefacts. | P0 |
+| REQ_UX_003 | UX | Toute commande/script proposé(e) DOIT être accompagné(e) d’un contexte (“pourquoi”, “impact”). | P1 |
+| REQ_CORE_017 | CORE | Une commande/script proposé(e) DOIT être exécutable seulement après validation explicite. | P0 |
+| REQ_AUDIT_005 | AUDIT | Une commande/script proposé(e) DOIT être journalisé(e) dans le ledger ; les refus (“non exécuté”) DOIVENT aussi être journalisés. | P0 |
+| REQ_AUDIT_006 | AUDIT | Comptabilité coûts : le wrapper DOIT lire à chaque réponse API les champs d’usage (tokens entrée/sortie si disponibles). | P0 |
+| REQ_AUDIT_007 | AUDIT | Le wrapper DOIT agréger les coûts/tokens par session, projet, mois. | P0 |
+| REQ_CORE_018 | CORE | Le wrapper DOIT appliquer une grille de prix du modèle utilisé (paramétrable). | P0 |
+| REQ_UX_004 | UX | Le wrapper DOIT produire des rapports : “ce mois”, “ce projet”, “top sessions coûteuses”. | P1 |
+| REQ_AUDIT_008 | AUDIT | Optionnel : le wrapper PEUT distinguer des catégories (draft vs final, etc.) si encodées. | P2 |
+| REQ_DATA_018 | DATA | Chaque projet DOIT pouvoir définir une policy (YAML/JSON concept) incluant : modèle (snapshot/alias), budgets (caps jour/mois/projet), limites de taille contexte, règles inclusion/exclusion extraits, règles “diff-only”, stratégie de reprise (resume pack obligatoire), règles stockage/hachage (manifests on/off). | P1 |
+| REQ_AUDIT_009 | AUDIT | Journalisation : le logging DOIT être double et systématique (Transcript + Ledger). | P0 |
+| REQ_AUDIT_010 | AUDIT | Transcript (Niveau 1) : fichier `sessions/<date>/transcript.log`, texte brut horodaté, copie verbatim stdin + stdout/stderr, capturant exactement ce que l’utilisateur a écrit et ce que le wrapper a affiché. | P0 |
+| REQ_AUDIT_011 | AUDIT | Ledger (Niveau 2) : fichier `ledger/events.jsonl` en JSONL structuré. | P0 |
+| REQ_AUDIT_012 | AUDIT | Chaque événement ledger DOIT inclure : `timestamp_utc` (précision milliseconde), `event_uuid`, `actor`, `action_type`, `payload_ref`, `artifacts_links`. | P0 |
+| REQ_AUDIT_013 | AUDIT | `payload_ref` DOIT pointer vers le JSON brut dans `sessions/raw_exchanges/` pour éviter d’alourdir le ledger. | P0 |
+| REQ_AUDIT_014 | AUDIT | Intégrité logs : les logs DOIVENT être en mode Append-Only. | P0 |
+| REQ_AUDIT_015 | AUDIT | Le wrapper DOIT fournir un moyen simple de retrouver l’échange IA exact (JSON brut envoyé/reçu) correspondant à une commande utilisateur donnée. | P0 |
+| REQ_UX_005 | UX | UX attendue : commande simple “appeler l’IA” sur une entrée structurée. | P1 |
+| REQ_UX_006 | UX | UX attendue : possibilité de relancer avec resume pack. | P1 |
+| REQ_UX_007 | UX | UX attendue : sorties concises + génération d’artefacts lisibles. | P0 |
+| REQ_UX_008 | UX | UX attendue : mode “rapport” (coût, état projet, derniers steps). | P1 |
+| REQ_UX_009 | UX | Le wrapper DOIT distinguer formellement Project Context (persistant) vs Transient Context (éphémère) injectés au modèle. | P0 |
+| REQ_UX_010 | UX | Project Context : contexte stable rattaché au projet (ex: `specs/`, `impl-docs/`, `src/`, `notes/`), construit par le wrapper (resume pack), servant de base de travail. | P0 |
+| REQ_UX_011 | UX | Transient Context : contexte fourni “à la volée” pour une requête unique, ne modifiant pas la mémoire long-terme et n’étant pas supposé être persisté dans les fichiers versionnés. | P0 |
+| REQ_UX_012 | UX | (Reprise exacte REQ-AFI-001) La CLI DOIT permettre à l’utilisateur d’attacher explicitement un ou plusieurs fichiers locaux à une requête (arguments chemin de fichier). | P0 |
+| REQ_UX_013 | UX | (Reprise exacte REQ-AFI-002) Le wrapper DOIT lire le contenu des fichiers attachés au runtime et l’injecter dans le prompt en tant que Transient Context, clairement séparé du Project Context, avec délimiteurs incluant au minimum chemin/identifiant + contenu brut. | P0 |
+| REQ_UX_014 | UX | (Reprise exacte REQ-AFI-003) Les fichiers ad-hoc NE DOIVENT PAS être intégrés automatiquement au Project Context (pas de copie par défaut vers `specs/`, `impl-docs/`, `src/`, `notes/`) ; ils DOIVENT être traités comme éphémères. | P0 |
+| REQ_UX_015 | UX | (Reprise exacte REQ-AFI-004) Le mécanisme DOIT permettre analyse/debug/réécriture on-the-fly de documents/logs/config/scripts sans copier-coller manuel dans le terminal. | P0 |
+| REQ_CORE_019 | CORE | Critère d’acceptation : l’IA DOIT refuser d’écrire du code (`src`) si on est en phase de définition (`specs`). | P0 |
+| REQ_AUDIT_016 | AUDIT | Critère d’acceptation : on DOIT pouvoir créer une session, appeler l’IA, et retrouver prompt, réponse brute, resume pack mis à jour, ledger événementiel. | P0 |
+| REQ_AUDIT_017 | AUDIT | Critère d’acceptation : l’utilisateur DOIT pouvoir prouver via `transcript.log` ce qu’il a demandé et le comparer au JSON brut de la réponse IA lié dans le ledger. | P0 |
+| REQ_CORE_020 | CORE | Critère d’acceptation : intégrité code “zéro copy-paste” — le code dans `artifacts/` DOIT être strictement identique au code reçu dans la réponse JSON de l’IA. | P0 |
+| REQ_CORE_021 | CORE | Critère d’acceptation : la reprise d’une session NE DOIT PAS nécessiter de renvoyer tout l’historique. | P0 |
+| REQ_AUDIT_018 | AUDIT | Critère d’acceptation : les coûts/tokens DOIVENT être visibles et agrégés. | P0 |
+| REQ_AUDIT_019 | AUDIT | Critère d’acceptation : les commandes/scripts proposés DOIVENT être journalisés et NE DOIVENT PAS s’exécuter “en douce”. | P0 |
+| REQ_DATA_019 | DATA | Critère d’acceptation : les artefacts produits DOIVENT être stockés proprement et retrouvables. | P0 |
+| REQ_DATA_020 | DATA | Critère d’acceptation : le code développé (source) DOIT être isolé dans `src/` versionné. | P0 |
+| REQ_DATA_021 | DATA | Critère d’acceptation : le `.gitignore` DOIT être généré en mode strict (whitelist). | P0 |
+| REQ_DATA_022 | DATA | Critère d’acceptation : toute modification de code DOIT s’accompagner d’une mise à jour de la documentation d’implémentation. | P0 |
+| REQ_UX_016 | UX | Critère d’acceptation : l’utilisateur DOIT pouvoir attacher un ou plusieurs fichiers locaux ; le wrapper DOIT les lire au runtime et injecter leur contenu comme Transient Context distinct du Project Context. | P0 |
+
+### 14.1 Vérification de cohérence (aucune exigence “hors-prose”)
+Toutes les exigences listées ci-dessus sont des reformulations directes (ou reprises exactes) des sections 1 à 13.
+* Les exigences explicitement demandées en “inclusions obligatoires” sont couvertes :
+  * **Intégrité binaire / Zéro Copy-Paste** : REQ_CORE_003, REQ_CORE_004, REQ_CORE_014, REQ_CORE_020.
+  * **Double logging (Transcript + Ledger JSONL)** : REQ_AUDIT_009 à REQ_AUDIT_015.
+  * **Injection de fichiers Ad-hoc** : REQ_UX_012 à REQ_UX_015 (+ rappel REQ_UX_016).
+  * **Gestion coûts & quotas** : coûts/tokens (REQ_AUDIT_006 à REQ_AUDIT_008, REQ_AUDIT_018) et budgets/caps via policy (REQ_DATA_018).
+  * **Isolation secrets & stratégie Git** : REQ_DATA_011, REQ_DATA_014, REQ_DATA_021.
+
+Si une exigence future devait être ajoutée au registre sans section détaillée correspondante, elle DOIT être soit :
+1) supprimée du registre, soit
+2) accompagnée d’une extension de prose dans la section appropriée avant d’être considérée “baseline”.
