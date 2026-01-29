@@ -314,13 +314,21 @@ def _cmd_report() -> None:
 
 def _print_help():
     GLOBAL_CONSOLE.print("Available Albert commands:")
-    GLOBAL_CONSOLE.print("  implement [-f file] - Execute an implementation task based on instructions")
+    GLOBAL_CONSOLE.print(
+        "  implement [-f file] [--scope {full,code,specs,minimal}] - Execute an implementation task based on instructions"
+    )
     GLOBAL_CONSOLE.print("  test_ai             - Send a minimal test request to the AI")
     GLOBAL_CONSOLE.print("  status              - Show git working tree status and last commit")
     GLOBAL_CONSOLE.print("  report              - Show aggregated tokens and estimated cost (from audit_log.jsonl)")
     GLOBAL_CONSOLE.print("  clear               - Clear the terminal screen")
     GLOBAL_CONSOLE.print("  help                - Show this help message")
     GLOBAL_CONSOLE.print("  exit                - Quit the CLI")
+
+    GLOBAL_CONSOLE.print("\nOptions for implement:")
+    GLOBAL_CONSOLE.print("  -f, --file   Attach a local file (transient context for this request)")
+    GLOBAL_CONSOLE.print(
+        "  --scope      Context scope to reduce tokens: full (default), code, specs, minimal"
+    )
 
 
 def _extract_attached_files(tokens: list[str]) -> list[str]:
@@ -350,6 +358,43 @@ def _extract_attached_files(tokens: list[str]) -> list[str]:
         i += 1
     # Remove empties (invalid) while keeping order
     return [p for p in attached if p]
+
+
+def _extract_scope(tokens: list[str]) -> str:
+    """Extract --scope value from a tokenized command line.
+
+    Supported forms:
+      - implement --scope code
+      - implement --scope=code
+
+    Returns scope string; defaults to 'full' if not provided/invalid.
+    """
+    scope = "full"
+    allowed = {"full", "code", "specs", "minimal"}
+
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t.startswith("--scope="):
+            val = t.split("=", 1)[1].strip().lower()
+            if val in allowed:
+                scope = val
+            i += 1
+            continue
+
+        if t == "--scope":
+            if i + 1 < len(tokens):
+                val = (tokens[i + 1] or "").strip().lower()
+                if val in allowed:
+                    scope = val
+                i += 2
+                continue
+            i += 1
+            continue
+
+        i += 1
+
+    return scope
 
 
 def _build_adhoc_file_injection(file_paths: list[str]) -> tuple[str, list[str], bool]:
@@ -455,6 +500,9 @@ def main():
                     GLOBAL_CONSOLE.print("❌ Action cancelled: one or more attached files could not be read.")
                     continue
 
+                # Parse context scope
+                scope = _extract_scope(tokens[1:])
+
                 # 1. Saisie du besoin (multi-line via nano)
                 instruction = get_input_from_editor("Describe the implementation task")
 
@@ -471,8 +519,8 @@ def main():
                 session_id = datetime.now().strftime("%Y-%m-%d")
 
                 # 2. Construction du contexte (La Mémoire)
-                GLOBAL_CONSOLE.print("Building project context...")
-                project_context = GLOBAL_CONTEXT.build_full_context()
+                GLOBAL_CONSOLE.print(f"Building project context (Scope: {scope})...")
+                project_context = GLOBAL_CONTEXT.build_full_context(scope=scope)
 
                 # 3. Assemblage du prompt User final
                 full_user_prompt = f"{instruction}\n\n{project_context}"

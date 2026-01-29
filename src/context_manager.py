@@ -42,54 +42,78 @@ class ContextManager:
             return True
         return False
 
-    def build_full_context(self) -> str:
-        """
-        Scan specs/, impl-docs/ et src/ pour construire le 'Resume Pack' complet.
-        C'est ce que l'IA va 'voir' du projet.
+    def build_full_context(self, scope: str = "full") -> str:
+        """Build the project context with a configurable scope.
 
-        Ordre d'inclusion (priorité) :
-          1) specs/ (référence)
-          2) impl-docs/ (doc vivante)
+        Scopes:
+          - "full"    : specs/ + impl-docs/ + src/
+          - "code"    : impl-docs/ + src/        (ignore specs/)
+          - "specs"   : specs/ + impl-docs/      (ignore src/)
+          - "minimal" : impl-docs/ only          (project structure map)
+
+        The "Project Root" header must always be present regardless of scope.
+
+        Ordering (when included):
+          1) specs/ (reference)
+          2) impl-docs/ (living docs)
           3) src/ (code)
         """
-        context_parts = []
+        scope = (scope or "full").strip().lower()
+        allowed = {"full", "code", "specs", "minimal"}
+        if scope not in allowed:
+            scope = "full"
+
+        include_specs = scope in {"full", "specs"}
+        include_impl_docs = True  # always included for all scopes
+        include_src = scope in {"full", "code"}
+
+        context_parts: list[str] = []
         context_parts.append("=== PROJECT CONTEXT (READ-ONLY) ===")
+        # Always show project root (critical context)
+        context_parts.append(f"Project Root: {self.project_root}")
 
-        # 1. Ajouter les spécifications (Priorité haute)
-        specs_dir = self.project_root / "specs"
-        if specs_dir.exists():
-            for f in sorted(specs_dir.glob("*.md")):
-                if self._should_skip_path(f):
-                    continue
-                rel_path = f.relative_to(self.project_root)
-                context_parts.append(self.get_file_content(str(rel_path)))
+        # 1) specs/
+        if include_specs:
+            specs_dir = self.project_root / "specs"
+            if specs_dir.exists():
+                for f in sorted(specs_dir.glob("*.md")):
+                    if self._should_skip_path(f):
+                        continue
+                    rel_path = f.relative_to(self.project_root)
+                    context_parts.append(self.get_file_content(str(rel_path)))
 
-        # 2. Ajouter la documentation d'implémentation (impl-docs/)
-        impl_docs_dir = self.project_root / "impl-docs"
-        if impl_docs_dir.exists():
-            for f in sorted(impl_docs_dir.rglob("*.md")):
-                if self._should_skip_path(f):
-                    continue
-                rel_path = f.relative_to(self.project_root)
-                context_parts.append(self.get_file_content(str(rel_path)))
+        # 2) impl-docs/
+        if include_impl_docs:
+            impl_docs_dir = self.project_root / "impl-docs"
+            if impl_docs_dir.exists():
+                for f in sorted(impl_docs_dir.rglob("*.md")):
+                    if self._should_skip_path(f):
+                        continue
+                    rel_path = f.relative_to(self.project_root)
+                    context_parts.append(self.get_file_content(str(rel_path)))
 
-        # 3. Ajouter le code source (src/)
-        src_dir = self.project_root / "src"
-        if src_dir.exists():
-            for f in sorted(src_dir.rglob("*.py")):
-                if self._should_skip_path(f):
-                    continue
-                # Comportement historique: éviter les chemins contenant "__"
-                if "__" in str(f):
-                    continue
-                rel_path = f.relative_to(self.project_root)
-                context_parts.append(self.get_file_content(str(rel_path)))
+        # 3) src/
+        if include_src:
+            src_dir = self.project_root / "src"
+            if src_dir.exists():
+                for f in sorted(src_dir.rglob("*.py")):
+                    if self._should_skip_path(f):
+                        continue
+                    # Comportement historique: éviter les chemins contenant "__"
+                    if "__" in str(f):
+                        continue
+                    rel_path = f.relative_to(self.project_root)
+                    context_parts.append(self.get_file_content(str(rel_path)))
 
         full_text = "\n\n".join(context_parts)
 
         # Log info tokens
         token_count = self.count_tokens(full_text)
-        GLOBAL_CONSOLE.print(f"Context loaded: {len(context_parts) - 1} files (~{token_count} tokens)")
+        # -2 because we add two headers: context marker + Project Root line
+        file_count = max(0, len(context_parts) - 2)
+        GLOBAL_CONSOLE.print(
+            f"Context loaded (scope={scope}): {file_count} files (~{token_count} tokens)"
+        )
 
         return full_text
 
