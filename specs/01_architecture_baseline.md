@@ -265,7 +265,7 @@ Le wrapper distingue formellement deux catégories de contexte injectées au mod
 Le wrapper est conforme au baseline si, pour un projet donné :
 * L'IA refuse d'écrire du code (src) si on est en phase de définition (specs).
 * On peut créer une session, appeler l’IA, et retrouver : prompt, réponse brute, resume pack mis à jour, ledger événementiel.
-* Traçabilité : En cas de doute, l'utilisateur peut ouvrir le transcript.log pour prouver ce qu'il a demandé, et le comparer avec le fichier JSON brut de la réponse IA lié dans le ledger.
+* Traçabilité : En cas de doute, l'utilisateur peut ouvrir le transcript.log pour prouver ce qu'il a demandé et le comparer avec le fichier JSON brut de la réponse IA lié dans le ledger.
 * Intégrité Code : Aucun copier-coller manuel n'est nécessaire. Le code présent dans artifacts/ est strictement identique au code reçu dans la réponse JSON de l'IA.
 * La reprise d’une session ne nécessite pas de renvoyer tout l’historique.
 * Les coûts/tokens sont visibles et agrégés.
@@ -351,6 +351,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_CORE_060 | Core / Governance | **The Trinity Protocol :** toute modification d’une couche (Specs, Code, Docs) DOIT déclencher une évaluation des deux autres. Code change => update `impl-docs/` + retrofit potentiel `specs/`. Spec change => implémentation `src/` + update `impl-docs/`. Doc change => refléter le comportement réel du code et les exigences des specs. | P0 |
 | REQ_AUDIT_003 | AUDIT | Un bundle de preuves (résumé, logs, diffs, erreurs) DOIT être produit à chaque exécution locale pour feedback à l’IA. | P1 |
 | REQ_CORE_016 | CORE | Sécurité d’exécution : le wrapper peut proposer des commandes/scripts, mais l’exécution réelle DOIT rester contrôlée (validation explicite). | P0 |
+| REQ_CORE_050 | Core / Security | **Safe Local Execution :** The system MUST possess a restricted interface to execute read-only system commands (e.g., directory listing, git status) to verify ground truth state. This interface MUST strictly block destructive commands (rm, mv, chmod, etc.) and sanitize inputs. | P0 |
 | REQ_AUDIT_004 | AUDIT | Toute commande/script proposé(e) DOIT être enregistré(e) dans les artefacts. | P0 |
 | REQ_UX_003 | UX | Toute commande/script proposé(e) DOIT être accompagné(e) d’un contexte (“pourquoi”, “impact”). | P1 |
 | REQ_CORE_017 | CORE | Une commande/script proposé(e) DOIT être exécutable seulement après validation explicite. | P0 |

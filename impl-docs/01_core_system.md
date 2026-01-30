@@ -98,6 +98,44 @@ Quand le code révèle un besoin non spécifié, on **retrofit** les specs : ajo
 
 > Corollaire : une doc d’implémentation fidèle (impl-docs) est le miroir nécessaire pour diagnostiquer et corriger tout écart Specs ↔ Code.
 
+### 1.5 Safe System Inspection (SSI) — REQ_CORE_050
+Albert inclut un mécanisme de **Safe System Inspection (SSI)** permettant au système (et donc à l’IA via le wrapper) d’effectuer des **observations empiriques** de l’environnement local (Ground Truth) sans mettre en danger la stabilité du système.
+
+**But :** autoriser des commandes **read-only** (inspection) afin de vérifier la réalité (structure de projet, état git, lecture de fichiers) avant de faire des hypothèses.
+
+#### 1.5.1 Module
+* **Code :** `src/system_tools.py`
+* **Classe :** `SafeCommandRunner`
+* **Méthode :** `run_safe_command(command_str)`
+
+#### 1.5.2 Allowlist (commandes autorisées)
+Allowlist stricte (préfixes exacts) :
+* `tree`
+* `ls`
+* `dir`
+* `git status`
+* `git log`
+* `git diff`
+* `find`
+* `grep`
+* `cat`
+
+> Les entrées multi-mots (ex: `git status`) doivent matcher le **préfixe exact** des tokens (`["git","status", ...]`).
+
+#### 1.5.3 Contraintes de sécurité
+SSI applique des garde-fous conservateurs :
+* **Interdiction des opérateurs de chaînage / redirection :** rejet si la commande contient `&&`, `;`, `|`, `>`.
+  * Objectif : empêcher l’injection shell, le piping vers des commandes non allowlistées, et les écritures via redirection.
+* **Pas de `shell=True` :** exécution via `subprocess.run(tokens, capture_output=True, text=True)`.
+* **Parsing robuste :** split via `shlex.split`.
+* **Blocage implicite des commandes destructrices :** `rm`, `mv`, `chmod`, etc. ne sont pas allowlistées, donc refusées.
+
+#### 1.5.4 Intégration dans le System Prompt
+Le prompt système (dans `src/main.py`) informe explicitement le modèle :
+> “You have access to a `run_safe_command` tool to inspect the file system (ls, tree) and git status. Use this to verify reality before making assumptions.”
+
+**Remarque :** l’outillage SSI est un mécanisme de sécurité et d’observation. Il ne remplace pas la gouvernance (Trinity Protocol) ni la validation humaine pour les actions à impact.
+
 
 ## 2. Modules Principaux (`src/`)
 

@@ -15,6 +15,7 @@ from src.console import GLOBAL_CONSOLE
 from src.ai_client import AIClient
 from src.artifact_manager import GLOBAL_ARTIFACTS
 from src.context_manager import GLOBAL_CONTEXT
+from src.system_tools import SafeCommandRunner
 
 SYSTEM_PROMPT_ARCHITECT = """
 You are a Senior Python Architect.
@@ -28,6 +29,10 @@ Consistency Enforcement:
     Code, Docs, and Help must never be out of sync.
 
     3. The `traceability_matrix.md` is the project's 'Source of Truth'. Any code generation or documentation update MUST be reflected in this matrix. If a feature is implemented without a Req_ID, you must alert the user to update the Specs first to maintain the Triple-Layer Alignment.
+
+TOOLS / GROUND TRUTH INSPECTION (REQ_CORE_050):
+You have access to a `run_safe_command` tool to inspect the file system (ls, tree) and git status.
+Use this to verify reality before making assumptions.
 
 RESPONSE FORMAT:
 {
@@ -550,6 +555,9 @@ def main():
     args = parser.parse_args()
 
     client = None
+
+    # Instantiate safe command runner (REQ_CORE_050)
+    _safe_runner = SafeCommandRunner(cwd=str(GLOBAL_CONFIG.project_root))
 
     try:
         while True:
