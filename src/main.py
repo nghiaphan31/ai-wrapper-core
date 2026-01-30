@@ -500,6 +500,43 @@ def _generate_step_id(now: datetime | None = None) -> str:
     return f"step_{timestamp}_{short_id}"
 
 
+def _trinity_protocol_consistency_check(generated_artifacts: list[str]) -> None:
+    """Best-effort runtime warning for REQ_CORE_060 (The Trinity Protocol).
+
+    Logic:
+      - Scan the list of generated artifact paths.
+      - Detect if any `src/` paths are present.
+      - If `src/` is present BUT (`impl-docs/` is missing OR `specs/` is missing), print a warning block.
+
+    Note:
+      - This is a warning, not a hard stop, because some sessions may intentionally stage code-only
+        changes for later retrofit.
+    """
+    if not generated_artifacts:
+        return
+
+    norm = []
+    for p in generated_artifacts:
+        if not p:
+            continue
+        s = str(p).replace("\\", "/")
+        norm.append(s)
+
+    has_src = any("/src/" in p or p.startswith("src/") for p in norm)
+    if not has_src:
+        return
+
+    has_impl_docs = any("/impl-docs/" in p or p.startswith("impl-docs/") for p in norm)
+    has_specs = any("/specs/" in p or p.startswith("specs/") for p in norm)
+
+    if has_src and (not has_impl_docs or not has_specs):
+        # Keep exactly the requested warning block text.
+        print("⚠️  TRINITY PROTOCOL WARNING")
+        print("--------------------------")
+        print("Code changes detected, but Specs/Docs were not updated in this session.")
+        print("Please verify alignment manually or ask for a retrofit.")
+
+
 def main():
     # Tool identity header (explicit, independent from project.json naming)
     GLOBAL_CONSOLE.print("--- ALBERT (Your Personal AI Steward) ---")
@@ -657,6 +694,24 @@ def main():
                             # We do not abort the script, just report the error.
                     else:
                         GLOBAL_CONSOLE.print("Changes were not applied.")
+
+                    # REQ_CORE_060: Consistency Check before final summary.
+                    # Scan generated artifacts (relative paths inside artifacts/<step_id>/...) to detect
+                    # whether this session updated src/ but did not update impl-docs/ or specs/.
+                    try:
+                        rel_artifacts = []
+                        for abs_path in files:
+                            try:
+                                p = Path(abs_path)
+                                rel = p.relative_to(artifact_folder)
+                                rel_artifacts.append(str(rel))
+                            except Exception:
+                                # If not under artifact folder, still include raw string
+                                rel_artifacts.append(str(abs_path))
+                        _trinity_protocol_consistency_check(rel_artifacts)
+                    except Exception:
+                        # Never block workflow on warning logic
+                        pass
 
                 else:
                     GLOBAL_CONSOLE.error("No files generated.")

@@ -97,6 +97,22 @@ Avant de payer des tokens, le wrapper doit privilégier la recherche texte local
 * Gestion Différentielle : Mises à jour partielles (patches) pour les fichiers de contexte.
 * Règle d'Or (Phase B) : Toute proposition de code (src/) DOIT être accompagnée de sa documentation technique (impl-docs/). Le wrapper signale tout manquement.
 
+### 6.5 Gouvernance : The Trinity Protocol (REQ_CORE_060)
+Le système applique un protocole de gouvernance visant à maintenir une **alignement strict** entre les trois couches :
+1) **Specs** (`specs/`) — théorie / exigences,
+2) **Code** (`src/`) — réalité / implémentation,
+3) **Docs d’implémentation** (`impl-docs/`) — cartographie vivante de la réalité.
+
+**Principe :** toute modification d’une couche DOIT déclencher une évaluation des deux autres.
+
+* **Code Change (src/)** : nécessite une mise à jour correspondante dans `impl-docs/` et peut nécessiter un retrofit dans `specs/` si l’implémentation introduit un comportement non couvert.
+* **Spec Change (specs/)** : nécessite une implémentation dans `src/` et une mise à jour dans `impl-docs/`.
+* **Doc Change (impl-docs/)** : DOIT refléter le comportement réel du code et les exigences des specs (pas de “doc fictionnelle”).
+
+Objectif : institutionnaliser une mentalité de **stewardship** (intendance) : la réalité (Code) et la théorie (Specs) se co-évoluent, et la documentation d’implémentation reste un miroir fidèle.
+
+**Note de traçabilité :** toute évolution gouvernée par ce protocole DOIT être reflétée dans `traceability_matrix.md` (Source of Truth).
+
 **6.4 Bundle de preuves**
 Production d'un bundle (résumé, logs, diffs, erreurs) à chaque exécution locale pour feedback à l’IA.
 
@@ -328,10 +344,11 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_CORE_011 | CORE | Phase B : l’IA agit comme Développeur Senior ; elle génère code + doc dans `artifacts/` ; le wrapper/humain teste/itère sans polluer `src/`. | P0 |
 | REQ_DATA_016 | DATA | Phase B : output final = commit Git sur `src/` et `impl-docs/`. | P0 |
 | REQ_CORE_012 | CORE | Réduction de tokens : le wrapper NE DOIT PAS renvoyer “toute la conversation” ; il DOIT construire un resume pack systématique adapté à la phase. | P0 |
-| REQ_CORE_013 | CORE | Avant appel IA, le wrapper DOIT privilégier la recherche texte locale et l’extraction ciblée (RAG “cheap”) pour éviter de payer des tokens inutilement. | P1 |
+| REQ_CORE_013 | CORE | Avant appel IA, le wrapper DOIT privilégier la recherche texte locale et l'extraction ciblée (RAG “cheap”) pour éviter de payer des tokens inutilement. | P1 |
 | REQ_CORE_014 | CORE | Anti Copy-Paste : le wrapper DOIT parser la réponse JSON de l’IA et écrire les fichiers directement sur disque dans `artifacts/`. | P0 |
 | REQ_CORE_015 | CORE | Gestion différentielle : le système DOIT supporter des mises à jour partielles (patches) pour les fichiers de contexte. | P1 |
 | REQ_DATA_017 | DATA | Règle d’Or Phase B : toute proposition de code (`src/`) DOIT être accompagnée de la documentation technique correspondante (`impl-docs/`) ; le wrapper signale tout manquement. | P0 |
+| REQ_CORE_060 | Core / Governance | **The Trinity Protocol :** toute modification d’une couche (Specs, Code, Docs) DOIT déclencher une évaluation des deux autres. Code change => update `impl-docs/` + retrofit potentiel `specs/`. Spec change => implémentation `src/` + update `impl-docs/`. Doc change => refléter le comportement réel du code et les exigences des specs. | P0 |
 | REQ_AUDIT_003 | AUDIT | Un bundle de preuves (résumé, logs, diffs, erreurs) DOIT être produit à chaque exécution locale pour feedback à l’IA. | P1 |
 | REQ_CORE_016 | CORE | Sécurité d’exécution : le wrapper peut proposer des commandes/scripts, mais l’exécution réelle DOIT rester contrôlée (validation explicite). | P0 |
 | REQ_AUDIT_004 | AUDIT | Toute commande/script proposé(e) DOIT être enregistré(e) dans les artefacts. | P0 |

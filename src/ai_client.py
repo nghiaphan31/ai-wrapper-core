@@ -106,10 +106,36 @@ class AIClient:
         payload_ref = f"sessions/{session_date}/raw_exchanges/{raw_filename}"
         return raw_path, payload_ref
 
+    def build_system_prompt(self, base_system_prompt: str) -> str:
+        """Build the final system prompt with mandatory governance instructions.
+
+        REQ_CORE_060 (The Trinity Protocol) is enforced here by injecting a mandatory
+        instruction block into the system message.
+
+        Note:
+          - This does not replace the existing rules; it appends a strict governance layer.
+          - The runtime side (src/main.py) also performs a best-effort warning check.
+        """
+        base = (base_system_prompt or "").rstrip()
+
+        trinity_block = (
+            "\n\n"
+            "TRINITY PROTOCOL ENABLED: You manage a strict ecosystem of Specs, Code, and Docs.\n"
+            "1. NEVER output Code without checking if `impl-docs/` needs an update.\n"
+            "2. NEVER implement a feature without checking if `specs/` needs a retrofit.\n"
+            "3. If you change one, you must evaluate the others.\n"
+            "Failure to align all three layers is a critical error.\n"
+        )
+
+        return f"{base}{trinity_block}"
+
     def send_chat_request(self, system_prompt: str, user_prompt: str) -> tuple[str, dict]:
         """Envoie une requête à l'IA, logue tout (Raw + Ledger), et retourne (content, usage_stats)."""
         request_id = str(uuid.uuid4())
         timestamp = datetime.now().isoformat()
+
+        # REQ_CORE_060: ensure the final system prompt includes Trinity Protocol block.
+        system_prompt = self.build_system_prompt(system_prompt)
 
         # 1. Préparation de la payload
         messages = [

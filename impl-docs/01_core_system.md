@@ -60,6 +60,44 @@ Le fichier **`traceability_matrix.md`** (à la racine du projet) est la **Source
 #### 1.3.3 Gestion des écarts
 - Si une fonctionnalité est implémentée mais **sans Req_ID**, il faut **mettre à jour les Specs d’abord** (ajout au registre d’exigences) avant de considérer la feature « conforme ». Cela maintient l’alignement *Specs ↔ Code ↔ Impl-Docs*.
 
+### 1.4 Governance: The Trinity Protocol (REQ_CORE_060)
+Albert institutionnalise une gouvernance stricte appelée **The Trinity Protocol** : l’alignement permanent entre **Specs**, **Code**, et **Docs**.
+
+#### 1.4.1 Principe
+Toute modification d’une couche (**Specs**, **Code**, ou **Docs**) DOIT déclencher une évaluation des deux autres.
+
+* **Code Change (`src/`)** → nécessite une mise à jour correspondante dans `impl-docs/` et peut nécessiter un retrofit dans `specs/`.
+* **Spec Change (`specs/`)** → nécessite une implémentation dans `src/` et une mise à jour dans `impl-docs/`.
+* **Doc Change (`impl-docs/`)** → DOIT refléter le comportement réel du code et les exigences des specs.
+
+#### 1.4.2 Mécanisme 1 : Enforcement via System Prompt
+Le système renforce ce protocole au niveau du modèle via le **System Prompt**.
+
+* **Où :** `src/ai_client.py`
+* **Mécanisme :** le client construit le prompt système final en **appendant** un bloc obligatoire :
+  * “TRINITY PROTOCOL ENABLED …”
+  * règles : ne jamais produire du code sans évaluer `impl-docs/`, ne jamais implémenter une feature sans évaluer `specs/`, et obligation d’évaluer les trois couches.
+
+Objectif : rendre l’IA *steward* de l’écosystème, pas seulement générateur de fichiers.
+
+#### 1.4.3 Mécanisme 2 : Runtime Warnings (best-effort)
+En complément, Albert effectue un contrôle **best-effort** au runtime dans le flux `implement`.
+
+* **Où :** `src/main.py` (commande `implement`)
+* **Logique :** après génération des artefacts, Albert scanne les chemins de fichiers générés.
+  * si des changements `src/` sont détectés **sans** présence de `impl-docs/` et/ou `specs/` dans la même session, Albert affiche un bloc d’avertissement.
+
+Ce mécanisme ne bloque pas l’exécution (pas de hard stop), car certaines sessions peuvent volontairement produire du code « en avance » avant retrofit. L’objectif est d’éviter les dérives silencieuses.
+
+#### 1.4.4 Philosophie “Retrofit” (Reality → Theory)
+Le protocole assume une philosophie explicite :
+
+*La réalité (Code) doit alimenter la théorie (Specs).* 
+
+Quand le code révèle un besoin non spécifié, on **retrofit** les specs : ajout/clarification d’exigences, mise à jour du registre, et mise à jour de la matrice de traçabilité.
+
+> Corollaire : une doc d’implémentation fidèle (impl-docs) est le miroir nécessaire pour diagnostiquer et corriger tout écart Specs ↔ Code.
+
 
 ## 2. Modules Principaux (`src/`)
 
