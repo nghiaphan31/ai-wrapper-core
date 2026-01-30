@@ -136,6 +136,35 @@ Le prompt système (dans `src/main.py`) informe explicitement le modèle :
 
 **Remarque :** l’outillage SSI est un mécanisme de sécurité et d’observation. Il ne remplace pas la gouvernance (Trinity Protocol) ni la validation humaine pour les actions à impact.
 
+### 1.6 Git Resilience (REQ_CORE_080)
+Albert applique une politique de **résilience Git** pour éviter que la chaîne “Artifact-First” ne casse sur un cas courant : `git commit` sans changements.
+
+#### 1.6.1 Problème ciblé
+Quand les fichiers copiés depuis `artifacts/` vers les chemins versionnés sont identiques (ou quand l’utilisateur a accepté des diffs mais le contenu final est inchangé), Git peut répondre :
+* `nothing to commit`,
+* `working tree clean`,
+* ou équivalent.
+
+Par défaut, certaines implémentations traitent ce cas comme une erreur (exit status 1) et font crasher le wrapper, ce qui casse le workflow.
+
+#### 1.6.2 Règle implémentée
+* **Si** la commande est `git commit` **et** le return code est `1` **et** la sortie contient “nothing to commit” / “working tree clean” :
+  * Albert **n’échoue pas**,
+  * log : `⚠️ Git: Nothing to commit. Proceeding...`,
+  * et continue l’exécution.
+
+#### 1.6.3 Staging strict (whitelist) + `-f`
+Pour rester cohérent avec la stratégie `.gitignore` “deny-all / allow specific”, Albert stage explicitement les chemins versionnés uniquement :
+* `project.json`, `src/`, `specs/`, `impl-docs/`, `notes/`
+
+Le staging est effectué avec `git add -f -- <paths...>` pour éviter des cas de configuration où des fichiers versionnés seraient ignorés par erreur.
+
+> Important : Albert **ne stage jamais** `artifacts/` (NO GIT). Les artefacts restent locaux et sont notarizés via le manifest (`manifests/`).
+
+#### 1.6.4 Isolation des erreurs : Tool Loop vs Git
+Le flux d’exécution d’outils (REQ_AUDIT_060) et le flux Git sont isolés par des `try/except` distincts dans `src/main.py` :
+* un échec Git ne doit pas empêcher l’exécution de la tool chain,
+* et la tool chain ne doit pas être confondue avec des erreurs de commit/push.
 
 ## 2. Modules Principaux (`src/`)
 
@@ -304,8 +333,9 @@ La validation est **atomique** :
 Si (et seulement si) la revue interactive est validée pour **tous** les fichiers :
 1. Albert **copie** l’ensemble des fichiers depuis `artifacts/<step_id>/...` vers leurs chemins cibles dans le projet (merge local).
 2. Albert exécute ensuite la séquence Git suivante :
-   * `git add .`
-   * `git commit -m <message>` (le message est dérivé de l’instruction utilisateur)
+   * `git add -f -- project.json src specs impl-docs notes`
+   * `git commit -m <message>`
+     * si Git répond “nothing to commit / working tree clean”, Albert loggue un warning et continue (REQ_CORE_080)
    * `git push`
 
 3. Albert écrit une entrée dans `audit_log.jsonl` (transaction `success`) incluant les tokens.

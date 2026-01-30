@@ -277,7 +277,7 @@ Le wrapper distingue formellement deux catégories de contexte injectées au mod
 Le wrapper est conforme au baseline si, pour un projet donné :
 * L'IA refuse d'écrire du code (src) si on est en phase de définition (specs).
 * On peut créer une session, appeler l’IA, et retrouver : prompt, réponse brute, resume pack mis à jour, ledger événementiel.
-* Traçabilité : En cas de doute, l'utilisateur peut ouvrir le transcript.log pour prouver ce qu'il a demandé et le comparer avec le fichier JSON brut de la réponse IA lié dans le ledger.
+* Traçabilité : En cas de doute, l'utilisateur peut ouvrir le transcript.log pour prouver ce qu’il a demandé et le comparer avec le fichier JSON brut de la réponse IA lié dans le ledger.
 * Intégrité Code : Aucun copier-coller manuel n'est nécessaire. Le code présent dans artifacts/ est strictement identique au code reçu dans la réponse JSON de l'IA.
 * La reprise d’une session ne nécessite pas de renvoyer tout l’historique.
 * Les coûts/tokens sont visibles et agrégés.
@@ -300,7 +300,7 @@ Cette section évalue l'alignement entre les solutions techniques spécifiées e
 | Confiance & Traçabilité (ANTI-DECEPTION) | Double logging (Transcript + Ledger avec payloads bruts). Tout est vérifiable. | Maximale. |
 | Intégrité Scripts (Zéro Copy-Paste) | Écriture directe des artefacts via parsing JSON. Pas d'erreur humaine possible. | Totale. |
 | Maîtrise des coûts | "Resume Packs" + Patchs différentiels. | Optimisée. |
-| Sécurité d'exécution | Validation explicite. Isolation secrets. | Elevée. |
+| Sécurité d’exécution | Validation explicite. Isolation secrets. | Elevée. |
 | Rigueur Versioning | Stratégie Git "Whitelisting". | Robustesse. |
 
 **13.2 Gestion des Frictions Identifiées**
@@ -336,7 +336,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_DATA_001 | DATA | Un **Project** DOIT avoir une identité stable (slug), une description et des paramètres IA non secrets (modèle, styles, contraintes, budgets). | P0 |
 | REQ_DATA_002 | DATA | Un Project DOIT imposer une structure de documentation duale obligatoire : Spec vs Impl. | P0 |
 | REQ_DATA_003 | DATA | La **Technical Specification** DOIT être un document de référence versionné sous Git ; son évolution DOIT être contrôlée et rigoureuse (commit/diff). | P0 |
-| REQ_DATA_004 | DATA | L’**Implementation Documentation** DOIT être un document vivant reflétant “ce qui est codé” à l’instant T, incluant cartographie de l’implémentation (fonctions, arborescence, logs, ledgers, localisation artefacts). | P0 |
+| REQ_DATA_004 | DATA | L’**Implementation Documentation** DOIT être un document vivant reflétant “ce qui est codé” à l’instant T, incluant cartographie de l'implémentation (fonctions, arborescence, logs, ledgers, localisation artefacts). | P0 |
 | REQ_DATA_005 | DATA | Une **Session** DOIT être datée, rattachée à un projet, et DOIT produire des artefacts de reprise (resume pack) et un journal d’événements. | P0 |
 | REQ_DATA_006 | DATA | Un **Step** DOIT être une micro-étape atomique et DOIT contenir : prompt (intention), réponse IA, artefacts, preuve (diff/logs/extraits), et traçabilité vers l’état du code (conceptuellement via Git). | P0 |
 | REQ_AUDIT_001 | AUDIT | Un **Ledger event** DOIT être append-only et servir à l’audit (qui a demandé quoi, quelle IA, quels coûts, quels fichiers produits, quelles commandes proposées, etc.). | P0 |
@@ -364,6 +364,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_AUDIT_003 | AUDIT | Un bundle de preuves (résumé, logs, diffs, erreurs) DOIT être produit à chaque exécution locale pour feedback à l’IA. | P1 |
 | REQ_CORE_016 | CORE | Sécurité d’exécution : le wrapper peut proposer des commandes/scripts, mais l’exécution réelle DOIT rester contrôlée (validation explicite). | P0 |
 | REQ_CORE_050 | Core / Security | **Safe Local Execution :** The system MUST possess a restricted interface to execute read-only system commands (e.g., directory listing, git status) to verify ground truth state. This interface MUST strictly block destructive commands (rm, mv, chmod, etc.) and sanitize inputs. | P0 |
+| REQ_CORE_080 | CORE | **Git Resilience :** Le système DOIT gérer les commits Git vides de manière robuste. Si `git commit` rapporte “nothing to commit” / “working tree clean”, le wrapper DOIT loguer un avertissement et **continuer l’exécution** (pas de crash). | P0 |
 | REQ_AUDIT_004 | AUDIT | Toute commande/script proposé(e) DOIT être enregistré(e) dans les artefacts. | P0 |
 | REQ_UX_003 | UX | Toute commande/script proposé(e) DOIT être accompagné(e) d’un contexte (“pourquoi”, “impact”). | P1 |
 | REQ_CORE_017 | CORE | Une commande/script proposé(e) DOIT être exécutable seulement après validation explicite. | P0 |

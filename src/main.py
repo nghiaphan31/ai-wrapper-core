@@ -273,6 +273,66 @@ def _run_git_command(args: list[str]) -> tuple[int, str, str]:
         return 1, "", str(e)
 
 
+def _is_nothing_to_commit_output(stdout: str, stderr: str) -> bool:
+    """Detect the common 'nothing to commit' / 'working tree clean' messages.
+
+    REQ_CORE_080: treat empty commits as a soft success.
+    """
+    combined = f"{stdout or ''}\n{stderr or ''}".lower()
+    needles = [
+        "nothing to commit",
+        "working tree clean",
+        "no changes added to commit",
+    ]
+    return any(n in combined for n in needles)
+
+
+def run_git_command_resilient(args: list[str]) -> bool:
+    """Run git command with resilience rules.
+
+    REQ_CORE_080 (Git Resilience):
+      - If cmd is 'commit' AND returncode == 1 AND output indicates nothing to commit:
+        - log warning
+        - return True (soft success)
+      - Otherwise, return True on rc==0, False otherwise.
+
+    Never raises.
+    """
+    rc, out, err = _run_git_command(args)
+
+    cmd = (args[0] if args else "").strip().lower()
+    if cmd == "commit" and rc == 1 and _is_nothing_to_commit_output(out, err):
+        GLOBAL_CONSOLE.print("⚠️ Git: Nothing to commit. Proceeding...")
+        return True
+
+    if rc == 0:
+        return True
+
+    # Friendly error
+    details = (err or out).strip()
+    if details:
+        GLOBAL_CONSOLE.error(f"❌ Git Error: git {' '.join(args)} failed (rc={rc}). Details: {details}")
+    else:
+        GLOBAL_CONSOLE.error(f"❌ Git Error: git {' '.join(args)} failed (rc={rc}).")
+    return False
+
+
+def _git_add_tracked_paths_force() -> bool:
+    """Stage only the whitelisted, versioned paths.
+
+    Rationale:
+      - Root .gitignore uses a deny-all allowlist.
+      - We must not accidentally stage NO-GIT folders (artifacts/, sessions/, etc.).
+      - Using explicit paths is safer than 'git add .'.
+      - Use -f to ensure files that are ignored *by mistake* (or during transition) can still be staged.
+
+    Note:
+      - This does NOT force-add artifacts/; we only stage the versioned roots.
+    """
+    paths = ["project.json", "src", "specs", "impl-docs", "notes"]
+    return run_git_command_resilient(["add", "-f", "--", *paths])
+
+
 def _cmd_status() -> None:
     """Print repository status information using git.
 
@@ -621,6 +681,10 @@ def _process_tool_code_loop(client: AIClient, initial_ai_text: str) -> str:
       - This loop does not wait for user input.
       - Artifacts are tracked by GLOBAL_ARTIFACTS for inclusion in session manifest.
       - To avoid infinite loops, a hard max iteration count is enforced.
+
+    Important:
+      - This function is intentionally isolated from Git operations. Tool execution and Git commit
+        failures must not be coupled (REQ_AUDIT_060 + REQ_CORE_080).
     """
     ai_text = initial_ai_text or ""
     max_iters = 5
@@ -794,50 +858,60 @@ def main():
                 # Parse context scope
                 scope = _extract_scope(tokens[1:])
 
-                # 1. Saisie du besoin (multi-line via nano)
-                instruction = get_input_from_editor("Describe the implementation task")
+                # TOOL EXECUTION / AI LOOP (try/except distinct from Git)
+                try:
+                    # 1. Saisie du besoin (multi-line via nano)
+                    instruction = get_input_from_editor("Describe the implementation task")
 
-                # Strict Filtering (Zero Waste): do NOT build context or call API if empty
-                if not instruction.strip():
-                    GLOBAL_CONSOLE.print("❌ Action cancelled: Empty instruction.")
-                    continue
+                    # Strict Filtering (Zero Waste): do NOT build context or call API if empty
+                    if not instruction.strip():
+                        GLOBAL_CONSOLE.print("❌ Action cancelled: Empty instruction.")
+                        continue
 
-                # Append transient context (ad-hoc files) for this request only
-                if injection_text:
-                    instruction = f"{instruction.rstrip()}\n\n{injection_text.lstrip()}"
+                    # Append transient context (ad-hoc files) for this request only
+                    if injection_text:
+                        instruction = f"{instruction.rstrip()}\n\n{injection_text.lstrip()}"
 
-                # 2. Construction du contexte (La Mémoire)
-                GLOBAL_CONSOLE.print(f"Building project context (Scope: {scope})...")
-                project_context = GLOBAL_CONTEXT.build_full_context(scope=scope)
+                    # 2. Construction du contexte (La Mémoire)
+                    GLOBAL_CONSOLE.print(f"Building project context (Scope: {scope})...")
+                    project_context = GLOBAL_CONTEXT.build_full_context(scope=scope)
 
-                # 3. Assemblage du prompt User final
-                full_user_prompt = f"{instruction}\n\n{project_context}"
+                    # 3. Assemblage du prompt User final
+                    full_user_prompt = f"{instruction}\n\n{project_context}"
 
-                GLOBAL_CONSOLE.print("Requesting Architect AI (expecting JSON)...")
+                    GLOBAL_CONSOLE.print("Requesting Architect AI (expecting JSON)...")
 
-                # 4. Appel API
-                json_response, usage_stats = client.send_chat_request(
-                    system_prompt=SYSTEM_PROMPT_ARCHITECT,
-                    user_prompt=full_user_prompt,
-                )
+                    # 4. Appel API
+                    json_response, usage_stats = client.send_chat_request(
+                        system_prompt=SYSTEM_PROMPT_ARCHITECT,
+                        user_prompt=full_user_prompt,
+                    )
 
-                # REQ_AUDIT_060: Artifact-first tool execution loop (no user input)
-                json_response = _process_tool_code_loop(client=client, initial_ai_text=json_response)
+                    # REQ_AUDIT_060: Artifact-first tool execution loop (no user input)
+                    json_response = _process_tool_code_loop(client=client, initial_ai_text=json_response)
 
-                # 5. Écriture des artefacts
-                step_id = _generate_step_id()
-                files = GLOBAL_ARTIFACTS.process_response(
-                    session_id="current",
-                    step_name=step_id,
-                    raw_text=json_response,
-                )
+                    # 5. Écriture des artefacts
+                    step_id = _generate_step_id()
+                    files = GLOBAL_ARTIFACTS.process_response(
+                        session_id="current",
+                        step_name=step_id,
+                        raw_text=json_response,
+                    )
+
+                except Exception as e:
+                    GLOBAL_CONSOLE.error(f"❌ Tool/AI execution failed: {e}")
+                    # Still attempt manifest generation below (best-effort) if any artifacts were tracked.
+                    # But we cannot proceed to review/apply without files.
+                    files = []
+                    usage_stats = {}
+                    step_id = _generate_step_id()
 
                 if files:
                     artifact_folder = GLOBAL_CONFIG.project_root / "artifacts" / step_id
                     GLOBAL_CONSOLE.print(f"SUCCESS: Generated {len(files)} files in artifacts/{step_id}/")
 
                     # 6. Interactive Review & Auto-Merge Workflow
-                    commit_message = instruction.strip()
+                    commit_message = (instruction or "").strip()
                     should_apply = review_and_apply(artifact_folder=artifact_folder, commit_message=commit_message)
 
                     if should_apply:
@@ -851,17 +925,29 @@ def main():
                             dest_path.parent.mkdir(parents=True, exist_ok=True)
                             shutil.copyfile(artifact_path, dest_path)
 
-                        # Git Phase
+                        # GIT PHASE (separate try/except)
+                        git_ok = True
                         try:
-                            # Use check=True to raise CalledProcessError on failure
-                            subprocess.run(["git", "add", "."], check=True)
-                            subprocess.run(["git", "commit", "-m", commit_message], check=True)
-                            subprocess.run(["git", "push"], check=True)
+                            # Stage only versioned paths (whitelist) and force-add them.
+                            git_ok = _git_add_tracked_paths_force()
 
-                            # Audit Ledger transaction (after successful push)
+                            # Commit (REQ_CORE_080: empty commit is soft-success)
+                            if git_ok:
+                                git_ok = run_git_command_resilient(["commit", "-m", commit_message])
+
+                            # Push (only if previous steps ok)
+                            if git_ok:
+                                git_ok = run_git_command_resilient(["push"])
+
+                        except Exception as e:
+                            git_ok = False
+                            GLOBAL_CONSOLE.error(f"❌ Git Error: unexpected failure: {e}")
+
+                        # Audit transaction only if push succeeded (keeps previous semantics)
+                        if git_ok:
                             GLOBAL_LEDGER.log_transaction(
                                 session_id=session_id,
-                                user_instruction=instruction.strip(),
+                                user_instruction=(instruction or "").strip(),
                                 step_id=step_id,
                                 usage_stats=usage_stats,
                                 status="success",
@@ -878,10 +964,10 @@ def main():
                             GLOBAL_CONSOLE.print(
                                 f"Estimated Cost: input=${in_cost:.6f}, output=${out_cost:.6f}, total=${total_cost:.6f}"
                             )
-                        except subprocess.CalledProcessError as e:
-                            GLOBAL_CONSOLE.error(f"❌ Git Error: Command failed. {e}")
-                            # Do not print Success.
-                            # We do not abort the script, just report the error.
+                        else:
+                            # REQ_CORE_080: Git failures should not crash the wrapper.
+                            GLOBAL_CONSOLE.error("Git workflow did not complete successfully. Your changes may be applied locally but not committed/pushed.")
+
                     else:
                         GLOBAL_CONSOLE.print("Changes were not applied.")
 
