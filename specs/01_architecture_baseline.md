@@ -64,6 +64,18 @@ Arborescence racine : `~/ai-work/projects/<project_slug>/`
 * Flux de production : L'IA génère des propositions dans artifacts/ ou outputs/. Une fois validés par l'humain, les fichiers sont déplacés/mergés dans src/ et commités.
 * Protection Git (Whitelisting) : Le fichier .gitignore à la racine doit impérativement utiliser une stratégie "Deny All / Allow Specific". Il doit ignorer tout (*) par défaut, et n'autoriser explicitement (avec !) que les dossiers versionnés (src/, specs/, impl-docs/, project.json, notes/) pour éviter toute pollution accidentelle par des logs ou des artefacts.
 
+### 5.1 Résilience Git (REQ_CORE_080)
+Cette section formalise un cas courant qui ne doit **jamais** casser le workflow : un commit Git vide.
+
+**REQ_CORE_080 (Git Resilience) :**
+Le système MUST interpréter Git exit code **1** avec un message **"nothing to commit"** (ou **"working tree clean"**) comme un **SUCCESS (Warning)**, et non comme une **FATAL ERROR**. Le flux d’exécution DOIT continuer.
+
+**Rationale :**
+Dans un wrapper "artifact-first", il est possible que des fichiers aient été copiés/validés mais que le contenu final soit identique (ex: re-génération identique, acceptation de diff vide, normalisation). Git peut alors retourner `1` pour `git commit` avec un message indiquant qu’il n’y a rien à committer. Ce cas est attendu et ne doit pas empêcher :
+* l’exécution d’outils (audit/inspection),
+* la génération de manifests,
+* ou la continuation de la session.
+
 ## 6) Workflow Séquentiel (Cycle de Vie)
 Le travail est strictement divisé en deux phases distinctes.
 

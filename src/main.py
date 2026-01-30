@@ -17,6 +17,7 @@ from src.ai_client import AIClient
 from src.artifact_manager import GLOBAL_ARTIFACTS
 from src.context_manager import GLOBAL_CONTEXT
 from src.system_tools import SafeCommandRunner
+from src.utils import git_add_force_tracked_paths, git_commit_resilient, git_run_ok
 
 SYSTEM_PROMPT_ARCHITECT = """
 You are a Senior Python Architect.
@@ -79,7 +80,6 @@ def _echo_external_editor_input_to_console_and_transcript(content: str) -> None:
         GLOBAL_CONSOLE.print(">")
     else:
         for line in text.split("\n"):
-            # Keep exact lines; do not strip trailing spaces (but split() already drops \n)
             GLOBAL_CONSOLE.print(f"> {line}")
 
     GLOBAL_CONSOLE.print("[END_INPUT]")
@@ -112,14 +112,11 @@ def get_input_from_editor(prompt_text: str) -> str:
             tf_path = tf.name
             tf.flush()
 
-        # Let the user edit in nano
         subprocess.run(["nano", tf_path], check=False)
 
-        # Read back content
         with open(tf_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # CRITICAL (REQ_AUDIT_031): immediately echo external editor input into transcript
         _echo_external_editor_input_to_console_and_transcript(content)
 
         return content
@@ -151,7 +148,6 @@ def show_diff(
         try:
             old_text = target_path.read_text(encoding="utf-8")
         except Exception:
-            # Fallback: treat unreadable as empty to still show full add diff
             old_text = ""
 
     old_lines = old_text.splitlines(keepends=True)
@@ -177,7 +173,6 @@ def show_diff(
 
     GLOBAL_CONSOLE.print(f"--- Diff: {target_path} ---")
     for line in diff_lines:
-        # Preserve diff headers without color
         if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
             print(line)
             continue
@@ -193,16 +188,7 @@ def show_diff(
 
 
 def review_and_apply(artifact_folder: str | Path, commit_message: str) -> bool:
-    """Interactive review of artifacts with atomic accept-all rule.
-
-    Phase 1 (Review):
-      - Iterate all files under artifact_folder
-      - For each file, compute destination path by stripping the artifact_folder prefix
-      - Show diff and ask user to apply
-      - If user says 'n' or 'abort' at any time: return False immediately (no copies)
-
-    If all accepted, this function returns True.
-    """
+    """Interactive review of artifacts with atomic accept-all rule."""
     artifact_folder = Path(artifact_folder)
     if not artifact_folder.exists():
         GLOBAL_CONSOLE.error(f"Artifact folder not found: {artifact_folder}")
@@ -223,7 +209,6 @@ def review_and_apply(artifact_folder: str | Path, commit_message: str) -> bool:
         rel = artifact_path.relative_to(artifact_folder)
         dest_path = (project_root / rel).resolve()
 
-        # Persistent filename context at decision point
         try:
             rel_dest_path = str(dest_path.relative_to(project_root))
         except Exception:
@@ -235,11 +220,7 @@ def review_and_apply(artifact_folder: str | Path, commit_message: str) -> bool:
             GLOBAL_CONSOLE.error(f"Cannot read artifact file {artifact_path}: {e}")
             return False
 
-        has_changes = show_diff(dest_path, new_content, title_new="Artifact (New)")
-        if not has_changes:
-            # Still ask? spec says prompts for each file; but no changes should be safe to auto-accept.
-            # We'll still prompt to keep behavior consistent.
-            pass
+        _ = show_diff(dest_path, new_content, title_new="Artifact (New)")
 
         while True:
             ans = GLOBAL_CONSOLE.input(f"[{rel_dest_path}] Apply this change? [y/n/abort]: ").strip().lower()
@@ -250,140 +231,50 @@ def review_and_apply(artifact_folder: str | Path, commit_message: str) -> bool:
                 return False
             GLOBAL_CONSOLE.print("Please answer with 'y', 'n', or 'abort'.")
 
-    # All accepted
     return True
 
 
-def _run_git_command(args: list[str]) -> tuple[int, str, str]:
-    """Run a git command and return (returncode, stdout, stderr).
-
-    This is intentionally tolerant: it never raises, so callers can print friendly errors.
-    """
-    try:
-        proc = subprocess.run(
-            ["git", *args],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return proc.returncode, (proc.stdout or ""), (proc.stderr or "")
-    except FileNotFoundError:
-        return 127, "", "git executable not found"
-    except Exception as e:
-        return 1, "", str(e)
-
-
-def _is_nothing_to_commit_output(stdout: str, stderr: str) -> bool:
-    """Detect the common 'nothing to commit' / 'working tree clean' messages.
-
-    REQ_CORE_080: treat empty commits as a soft success.
-    """
-    combined = f"{stdout or ''}\n{stderr or ''}".lower()
-    needles = [
-        "nothing to commit",
-        "working tree clean",
-        "no changes added to commit",
-    ]
-    return any(n in combined for n in needles)
-
-
-def run_git_command_resilient(args: list[str]) -> bool:
-    """Run git command with resilience rules.
-
-    REQ_CORE_080 (Git Resilience):
-      - If cmd is 'commit' AND returncode == 1 AND output indicates nothing to commit:
-        - log warning
-        - return True (soft success)
-      - Otherwise, return True on rc==0, False otherwise.
-
-    Never raises.
-    """
-    rc, out, err = _run_git_command(args)
-
-    cmd = (args[0] if args else "").strip().lower()
-    if cmd == "commit" and rc == 1 and _is_nothing_to_commit_output(out, err):
-        GLOBAL_CONSOLE.print("⚠️ Git: Nothing to commit. Proceeding...")
-        return True
-
-    if rc == 0:
-        return True
-
-    # Friendly error
-    details = (err or out).strip()
-    if details:
-        GLOBAL_CONSOLE.error(f"❌ Git Error: git {' '.join(args)} failed (rc={rc}). Details: {details}")
-    else:
-        GLOBAL_CONSOLE.error(f"❌ Git Error: git {' '.join(args)} failed (rc={rc}).")
-    return False
-
-
-def _git_add_tracked_paths_force() -> bool:
-    """Stage only the whitelisted, versioned paths.
-
-    Rationale:
-      - Root .gitignore uses a deny-all allowlist.
-      - We must not accidentally stage NO-GIT folders (artifacts/, sessions/, etc.).
-      - Using explicit paths is safer than 'git add .'.
-      - Use -f to ensure files that are ignored *by mistake* (or during transition) can still be staged.
-
-    Note:
-      - This does NOT force-add artifacts/; we only stage the versioned roots.
-    """
-    paths = ["project.json", "src", "specs", "impl-docs", "notes"]
-    return run_git_command_resilient(["add", "-f", "--", *paths])
-
-
 def _cmd_status() -> None:
-    """Print repository status information using git.
-
-    Output:
-      1) Header
-      2) `git status -s`
-      3) `git log -1 --format=\"%h - %s (%cr)\"`
-
-    If git is not available or fails, prints a friendly error message.
-    """
+    """Print repository status information using git."""
     GLOBAL_CONSOLE.print("--- Repository Status ---")
 
-    rc1, out1, err1 = _run_git_command(["status", "-s"])
-    if rc1 != 0:
-        GLOBAL_CONSOLE.error(
-            "Git status is unavailable. Ensure 'git' is installed and you are inside a git repository."
-        )
-        if err1.strip():
-            GLOBAL_CONSOLE.error(f"Details: {err1.strip()}")
+    try:
+        proc1 = subprocess.run(["git", "status", "-s"], capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        GLOBAL_CONSOLE.error("Git status is unavailable. Ensure 'git' is installed and you are inside a git repository.")
         return
 
-    # Print pending changes (can be empty)
-    out1 = out1.rstrip("\n")
+    if proc1.returncode != 0:
+        GLOBAL_CONSOLE.error("Git status is unavailable. Ensure 'git' is installed and you are inside a git repository.")
+        if (proc1.stderr or "").strip():
+            GLOBAL_CONSOLE.error(f"Details: {(proc1.stderr or '').strip()}")
+        return
+
+    out1 = (proc1.stdout or "").rstrip("\n")
     if out1.strip():
         GLOBAL_CONSOLE.print(out1)
     else:
         GLOBAL_CONSOLE.print("Working tree clean.")
 
-    rc2, out2, err2 = _run_git_command(["log", "-1", "--format=%h - %s (%cr)"])
-    if rc2 != 0:
-        GLOBAL_CONSOLE.error(
-            "Git log is unavailable. Ensure this repository has commits and git is working correctly."
-        )
-        if err2.strip():
-            GLOBAL_CONSOLE.error(f"Details: {err2.strip()}")
+    proc2 = subprocess.run(
+        ["git", "log", "-1", "--format=%h - %s (%cr)"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc2.returncode != 0:
+        GLOBAL_CONSOLE.error("Git log is unavailable. Ensure this repository has commits and git is working correctly.")
+        if (proc2.stderr or "").strip():
+            GLOBAL_CONSOLE.error(f"Details: {(proc2.stderr or '').strip()}")
         return
 
-    out2 = out2.strip()
+    out2 = (proc2.stdout or "").strip()
     if out2:
         GLOBAL_CONSOLE.print(out2)
 
 
 def _estimate_cost_usd(usage_stats: dict) -> tuple[float, float, float]:
-    """Estimate USD cost based on token usage using centralized pricing.
-
-    Uses GLOBAL_CONFIG.PRICING_RATES:
-      - input_per_1m
-      - output_per_1m
-
-    Returns (input_cost, output_cost, total_cost).
-    """
+    """Estimate USD cost based on token usage using centralized pricing."""
     prompt_tokens = int((usage_stats or {}).get("prompt_tokens", 0) or 0)
     completion_tokens = int((usage_stats or {}).get("completion_tokens", 0) or 0)
 
@@ -434,21 +325,10 @@ def _print_help():
 
     GLOBAL_CONSOLE.print("\nOptions for implement:")
     GLOBAL_CONSOLE.print("  -f, --file   Attach a local file (transient context for this request)")
-    GLOBAL_CONSOLE.print(
-        "  --scope      Context scope to reduce tokens: full (default), code, specs, minimal"
-    )
+    GLOBAL_CONSOLE.print("  --scope      Context scope to reduce tokens: full (default), code, specs, minimal")
 
 
 def _extract_attached_files(tokens: list[str]) -> list[str]:
-    """Extract file paths passed via -f/--file from a tokenized command line.
-
-    Supported forms:
-      - implement -f path/to/file
-      - implement --file path/to/file
-      - implement -f path1 -f path2
-
-    Returns list of paths as provided (strings). Unknown flags are ignored.
-    """
     attached: list[str] = []
     i = 0
     while i < len(tokens):
@@ -458,25 +338,14 @@ def _extract_attached_files(tokens: list[str]) -> list[str]:
                 attached.append(tokens[i + 1])
                 i += 2
                 continue
-            else:
-                # Missing value; caller can decide how to handle.
-                attached.append("")
-                i += 1
-                continue
+            attached.append("")
+            i += 1
+            continue
         i += 1
-    # Remove empties (invalid) while keeping order
     return [p for p in attached if p]
 
 
 def _extract_scope(tokens: list[str]) -> str:
-    """Extract --scope value from a tokenized command line.
-
-    Supported forms:
-      - implement --scope code
-      - implement --scope=code
-
-    Returns scope string; defaults to 'full' if not provided/invalid.
-    """
     scope = "full"
     allowed = {"full", "code", "specs", "minimal"}
 
@@ -506,19 +375,6 @@ def _extract_scope(tokens: list[str]) -> str:
 
 
 def _build_adhoc_file_injection(file_paths: list[str]) -> tuple[str, list[str], bool]:
-    """Read attached files and build the transient injection block.
-
-    Returns:
-      (injection_text, attached_display_names, ok)
-
-    - injection_text: formatted per spec with delimiters.
-    - attached_display_names: list of filenames/paths confirmed to user.
-    - ok: False if a critical error should abort the implement flow.
-
-    Behavior:
-      - FileNotFoundError: prints error and aborts (ok=False) to avoid silent partial context.
-      - Other read errors: prints error and aborts.
-    """
     if not file_paths:
         return "", [], True
 
@@ -548,18 +404,6 @@ def _build_adhoc_file_injection(file_paths: list[str]) -> tuple[str, list[str], 
 
 
 def _generate_step_id(now: datetime | None = None) -> str:
-    """Generate a chronologically sortable step id for artifact folder naming.
-
-    Format:
-      step_%Y%m%d_%H%M%S_<short_id>
-
-    Example:
-      step_20260130_120500_a1b2
-
-    Notes:
-      - Timestamp ensures chronological ordering without relying on filesystem metadata.
-      - short_id is derived from uuid4 hex, truncated for readability.
-    """
     dt = now or datetime.now()
     timestamp = dt.strftime("%Y%m%d_%H%M%S")
     short_id = uuid.uuid4().hex[:4]
@@ -567,17 +411,6 @@ def _generate_step_id(now: datetime | None = None) -> str:
 
 
 def _trinity_protocol_consistency_check(generated_artifacts: list[str]) -> None:
-    """Best-effort runtime warning for REQ_CORE_060 (The Trinity Protocol).
-
-    Logic:
-      - Scan the list of generated artifact paths.
-      - Detect if any `src/` paths are present.
-      - If `src/` is present BUT (`impl-docs/` is missing OR `specs/` is missing), print a warning block.
-
-    Note:
-      - This is a warning, not a hard stop, because some sessions may intentionally stage code-only
-        changes for later retrofit.
-    """
     if not generated_artifacts:
         return
 
@@ -596,7 +429,6 @@ def _trinity_protocol_consistency_check(generated_artifacts: list[str]) -> None:
     has_specs = any("/specs/" in p or p.startswith("specs/") for p in norm)
 
     if has_src and (not has_impl_docs or not has_specs):
-        # Keep exactly the requested warning block text.
         print("⚠️  TRINITY PROTOCOL WARNING")
         print("--------------------------")
         print("Code changes detected, but Specs/Docs were not updated in this session.")
@@ -604,14 +436,6 @@ def _trinity_protocol_consistency_check(generated_artifacts: list[str]) -> None:
 
 
 def _extract_tool_code(ai_text: str) -> str | None:
-    """Extract python code wrapped in <tool_code>...</tool_code> tags.
-
-    REQ_AUDIT_060: tool execution must be artifact-first and transparent.
-
-    Returns:
-      - code string if tag found and non-empty
-      - None otherwise
-    """
     if not ai_text:
         return None
 
@@ -624,17 +448,6 @@ def _extract_tool_code(ai_text: str) -> str | None:
 
 
 def _run_tool_script_and_capture(project_root: Path, script_path: Path, timeout_s: int = 20) -> tuple[int, str, str]:
-    """Execute a python tool script with safety defaults.
-
-    Safety:
-      - Uses sys.executable (current python)
-      - No shell=True
-      - Timeout enforced
-      - cwd set to project root
-
-    Returns:
-      (returncode, stdout, stderr)
-    """
     try:
         proc = subprocess.run(
             [sys.executable, str(script_path)],
@@ -655,37 +468,10 @@ def _run_tool_script_and_capture(project_root: Path, script_path: Path, timeout_
 
 
 def _append_system_message_to_transcript(text: str) -> None:
-    """Log a system message to transcript.
-
-    Requirement mapping:
-      - REQ_AUDIT_060 feedback loop requires the system message to be logged to transcript.txt.
-        (Implementation uses transcript.log file via GLOBAL_CONSOLE.print.)
-
-    Uses GLOBAL_CONSOLE.print to ensure consistent transcript capture.
-    """
     GLOBAL_CONSOLE.print(text)
 
 
 def _process_tool_code_loop(client: AIClient, initial_ai_text: str) -> str:
-    """Process <tool_code> requests recursively until no tool code is present.
-
-    REQ_AUDIT_060 Glass Box loop:
-      1) Detect <tool_code>
-      2) Extract python code
-      3) Artifact 1: save tool_script.py under artifacts/step_<timestamp>_tool_request/
-      4) Execute script
-      5) Artifact 2: save stdout+stderr to tool_output.txt in same folder
-      6) Feedback loop: automatically send new message to AI with tool output
-
-    Notes:
-      - This loop does not wait for user input.
-      - Artifacts are tracked by GLOBAL_ARTIFACTS for inclusion in session manifest.
-      - To avoid infinite loops, a hard max iteration count is enforced.
-
-    Important:
-      - This function is intentionally isolated from Git operations. Tool execution and Git commit
-        failures must not be coupled (REQ_AUDIT_060 + REQ_CORE_080).
-    """
     ai_text = initial_ai_text or ""
     max_iters = 5
 
@@ -694,14 +480,12 @@ def _process_tool_code_loop(client: AIClient, initial_ai_text: str) -> str:
         if not code:
             return ai_text
 
-        # Step folder naming: step_<timestamp>_tool_request (per user requirement)
         step_id = f"step_{datetime.now().strftime('%Y%m%d_%H%M%S')}_tool_request"
         step_dir = GLOBAL_CONFIG.project_root / "artifacts" / step_id
 
         try:
             step_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            # If we cannot create artifacts, we must not execute (transparency requirement)
             msg = f"[WRAPPER] REQ_AUDIT_060: Cannot create tool artifact folder {step_dir}: {e}"
             GLOBAL_CONSOLE.error(msg)
             return ai_text
@@ -709,10 +493,8 @@ def _process_tool_code_loop(client: AIClient, initial_ai_text: str) -> str:
         script_path = step_dir / "tool_script.py"
         out_path = step_dir / "tool_output.txt"
 
-        # Artifact 1: write script BEFORE execution
         try:
             script_path.write_text(code + "\n", encoding="utf-8")
-            # Track as session artifact
             try:
                 GLOBAL_ARTIFACTS._session_artifacts.append(str(script_path.relative_to(GLOBAL_CONFIG.project_root)))
             except Exception:
@@ -728,14 +510,12 @@ def _process_tool_code_loop(client: AIClient, initial_ai_text: str) -> str:
             GLOBAL_CONSOLE.error(msg)
             return ai_text
 
-        # Execute
         rc, stdout, stderr = _run_tool_script_and_capture(
             project_root=GLOBAL_CONFIG.project_root,
             script_path=script_path,
             timeout_s=20,
         )
 
-        # Artifact 2: write output AFTER execution
         combined = "".join(
             [
                 f"returncode: {rc}\n",
@@ -748,7 +528,6 @@ def _process_tool_code_loop(client: AIClient, initial_ai_text: str) -> str:
 
         try:
             out_path.write_text(combined, encoding="utf-8")
-            # Track as session artifact
             try:
                 GLOBAL_ARTIFACTS._session_artifacts.append(str(out_path.relative_to(GLOBAL_CONFIG.project_root)))
             except Exception:
@@ -760,17 +539,13 @@ def _process_tool_code_loop(client: AIClient, initial_ai_text: str) -> str:
                 artifacts=[str(out_path)],
             )
         except Exception as e:
-            # If output cannot be saved, we still stop the loop (cannot prove execution)
             msg = f"[WRAPPER] REQ_AUDIT_060: Failed to write tool output artifact {out_path}: {e}"
             GLOBAL_CONSOLE.error(msg)
             return ai_text
 
-        # Feedback loop: automatically send system message to AI
         system_feedback = f"System: Tool executed. Artifacts saved. Output:\n{combined}"
         _append_system_message_to_transcript(system_feedback)
 
-        # Send next request with tool output as the user prompt.
-        # (We keep system prompt constant; the AIClient will append Trinity + Tool instructions.)
         try:
             ai_text, _usage_stats = client.send_chat_request(
                 system_prompt=SYSTEM_PROMPT_ARCHITECT,
@@ -780,13 +555,11 @@ def _process_tool_code_loop(client: AIClient, initial_ai_text: str) -> str:
             GLOBAL_CONSOLE.error(f"[WRAPPER] Failed to send tool feedback to AI: {e}")
             return ai_text
 
-    # If max iters exceeded, return last response
     GLOBAL_CONSOLE.error("[WRAPPER] Tool loop aborted: max iterations reached.")
     return ai_text
 
 
 def main():
-    # Tool identity header (explicit, independent from project.json naming)
     GLOBAL_CONSOLE.print("--- ALBERT (Your Personal AI Steward) ---")
 
     project_name = GLOBAL_CONFIG.get_project_name()
@@ -795,21 +568,19 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", nargs="?", default="interactive")
-    args = parser.parse_args()
+    _args = parser.parse_args()
 
     client = None
 
-    # Instantiate safe command runner (REQ_CORE_050)
     _safe_runner = SafeCommandRunner(cwd=str(GLOBAL_CONFIG.project_root))
+    _ = _safe_runner  # reserved for future CLI exposure
 
     try:
         while True:
-            # Persistent project root context at decision point
             user_input = GLOBAL_CONSOLE.input(
                 f"[{GLOBAL_CONFIG.project_root}]\nCommand (implement, test_ai, status, report, help, clear, exit): "
             )
 
-            # Use shlex to handle quoted strings and flags correctly
             try:
                 tokens = shlex.split(user_input)
             except ValueError as e:
@@ -824,73 +595,68 @@ def main():
             if cmd in ["exit", "quit"]:
                 break
 
-            elif cmd == "help":
+            if cmd == "help":
                 _print_help()
+                continue
 
-            elif cmd == "clear":
+            if cmd == "clear":
                 os.system("clear")
+                continue
 
-            elif cmd == "status":
+            if cmd == "status":
                 _cmd_status()
+                continue
 
-            elif cmd == "report":
+            if cmd == "report":
                 _cmd_report()
+                continue
 
-            elif cmd == "test_ai":
+            if cmd == "test_ai":
                 if not client:
                     client = AIClient()
                 client.send_chat_request("You are helpful.", "Say Hello")
+                continue
 
-            elif cmd == "implement":
+            if cmd == "implement":
                 if not client:
                     client = AIClient()
 
-                # Session/Step identity (for traceability)
                 session_id = datetime.now().strftime("%Y-%m-%d")
 
-                # Parse ad-hoc file attachments from the original command line
                 file_paths = _extract_attached_files(tokens[1:])
                 injection_text, _attached, ok = _build_adhoc_file_injection(file_paths)
                 if not ok:
                     GLOBAL_CONSOLE.print("❌ Action cancelled: one or more attached files could not be read.")
                     continue
 
-                # Parse context scope
                 scope = _extract_scope(tokens[1:])
 
-                # TOOL EXECUTION / AI LOOP (try/except distinct from Git)
+                # TOOL EXECUTION / AI LOOP (isolated from Git). Even if Git later warns/fails,
+                # tool execution has already happened and must not be blocked.
                 try:
-                    # 1. Saisie du besoin (multi-line via nano)
                     instruction = get_input_from_editor("Describe the implementation task")
 
-                    # Strict Filtering (Zero Waste): do NOT build context or call API if empty
                     if not instruction.strip():
                         GLOBAL_CONSOLE.print("❌ Action cancelled: Empty instruction.")
                         continue
 
-                    # Append transient context (ad-hoc files) for this request only
                     if injection_text:
                         instruction = f"{instruction.rstrip()}\n\n{injection_text.lstrip()}"
 
-                    # 2. Construction du contexte (La Mémoire)
                     GLOBAL_CONSOLE.print(f"Building project context (Scope: {scope})...")
                     project_context = GLOBAL_CONTEXT.build_full_context(scope=scope)
 
-                    # 3. Assemblage du prompt User final
                     full_user_prompt = f"{instruction}\n\n{project_context}"
 
                     GLOBAL_CONSOLE.print("Requesting Architect AI (expecting JSON)...")
 
-                    # 4. Appel API
                     json_response, usage_stats = client.send_chat_request(
                         system_prompt=SYSTEM_PROMPT_ARCHITECT,
                         user_prompt=full_user_prompt,
                     )
 
-                    # REQ_AUDIT_060: Artifact-first tool execution loop (no user input)
                     json_response = _process_tool_code_loop(client=client, initial_ai_text=json_response)
 
-                    # 5. Écriture des artefacts
                     step_id = _generate_step_id()
                     files = GLOBAL_ARTIFACTS.process_response(
                         session_id="current",
@@ -900,22 +666,19 @@ def main():
 
                 except Exception as e:
                     GLOBAL_CONSOLE.error(f"❌ Tool/AI execution failed: {e}")
-                    # Still attempt manifest generation below (best-effort) if any artifacts were tracked.
-                    # But we cannot proceed to review/apply without files.
                     files = []
                     usage_stats = {}
                     step_id = _generate_step_id()
+                    instruction = ""
 
                 if files:
                     artifact_folder = GLOBAL_CONFIG.project_root / "artifacts" / step_id
                     GLOBAL_CONSOLE.print(f"SUCCESS: Generated {len(files)} files in artifacts/{step_id}/")
 
-                    # 6. Interactive Review & Auto-Merge Workflow
-                    commit_message = (instruction or "").strip()
+                    commit_message = (instruction or "").strip() or f"Implement changes ({step_id})"
                     should_apply = review_and_apply(artifact_folder=artifact_folder, commit_message=commit_message)
 
                     if should_apply:
-                        # Merge Phase: copy all artifacts to real destinations
                         artifact_files = [p for p in Path(artifact_folder).rglob("*") if p.is_file()]
                         artifact_files.sort(key=lambda p: str(p))
 
@@ -925,25 +688,23 @@ def main():
                             dest_path.parent.mkdir(parents=True, exist_ok=True)
                             shutil.copyfile(artifact_path, dest_path)
 
-                        # GIT PHASE (separate try/except)
+                        # GIT PHASE (separate from tool execution)
                         git_ok = True
                         try:
-                            # Stage only versioned paths (whitelist) and force-add them.
-                            git_ok = _git_add_tracked_paths_force()
+                            paths = ["project.json", "src", "specs", "impl-docs", "notes"]
+                            git_ok = git_add_force_tracked_paths(paths, cwd=str(GLOBAL_CONFIG.project_root))
 
-                            # Commit (REQ_CORE_080: empty commit is soft-success)
                             if git_ok:
-                                git_ok = run_git_command_resilient(["commit", "-m", commit_message])
+                                # REQ_CORE_080: empty commit must be treated as SUCCESS (Warning)
+                                git_ok = git_commit_resilient(commit_message, cwd=str(GLOBAL_CONFIG.project_root))
 
-                            # Push (only if previous steps ok)
                             if git_ok:
-                                git_ok = run_git_command_resilient(["push"])
+                                git_ok = git_run_ok(["push"], cwd=str(GLOBAL_CONFIG.project_root))
 
                         except Exception as e:
                             git_ok = False
                             GLOBAL_CONSOLE.error(f"❌ Git Error: unexpected failure: {e}")
 
-                        # Audit transaction only if push succeeded (keeps previous semantics)
                         if git_ok:
                             GLOBAL_LEDGER.log_transaction(
                                 session_id=session_id,
@@ -953,7 +714,6 @@ def main():
                                 status="success",
                             )
 
-                            # Console: Token Usage + Estimated Cost
                             pt = int((usage_stats or {}).get("prompt_tokens", 0) or 0)
                             ct = int((usage_stats or {}).get("completion_tokens", 0) or 0)
                             tt = int((usage_stats or {}).get("total_tokens", 0) or 0)
@@ -965,15 +725,14 @@ def main():
                                 f"Estimated Cost: input=${in_cost:.6f}, output=${out_cost:.6f}, total=${total_cost:.6f}"
                             )
                         else:
-                            # REQ_CORE_080: Git failures should not crash the wrapper.
-                            GLOBAL_CONSOLE.error("Git workflow did not complete successfully. Your changes may be applied locally but not committed/pushed.")
+                            # Must not crash; tool execution already completed.
+                            GLOBAL_CONSOLE.error(
+                                "Git workflow did not complete successfully. Your changes may be applied locally but not committed/pushed."
+                            )
 
                     else:
                         GLOBAL_CONSOLE.print("Changes were not applied.")
 
-                    # REQ_CORE_060: Consistency Check before final summary.
-                    # Scan generated artifacts (relative paths inside artifacts/<step_id>/...) to detect
-                    # whether this session updated src/ but did not update impl-docs/ or specs/.
                     try:
                         rel_artifacts = []
                         for abs_path in files:
@@ -982,18 +741,14 @@ def main():
                                 rel = p.relative_to(artifact_folder)
                                 rel_artifacts.append(str(rel))
                             except Exception:
-                                # If not under artifact folder, still include raw string
                                 rel_artifacts.append(str(abs_path))
                         _trinity_protocol_consistency_check(rel_artifacts)
                     except Exception:
-                        # Never block workflow on warning logic
                         pass
 
                 else:
                     GLOBAL_CONSOLE.error("No files generated.")
 
-                # REQ_DATA_030: generate session manifest at the end of the implement command.
-                # Must use the same GLOBAL_ARTIFACTS instance so it has artifact history.
                 try:
                     manifest_rel = GLOBAL_ARTIFACTS.generate_session_manifest(session_id=session_id)
                     if manifest_rel:
@@ -1003,8 +758,9 @@ def main():
                 except Exception as e:
                     GLOBAL_CONSOLE.error(f"Manifest generation failed: {e}")
 
-            else:
-                GLOBAL_CONSOLE.error("Unknown command. Type 'help' to see available commands.")
+                continue
+
+            GLOBAL_CONSOLE.error("Unknown command. Type 'help' to see available commands.")
 
     except KeyboardInterrupt:
         sys.exit(0)
