@@ -67,8 +67,12 @@ Arborescence racine : `~/ai-work/projects/<project_slug>/`
 ### 5.1 Résilience Git (REQ_CORE_080)
 Cette section formalise un cas courant qui ne doit **jamais** casser le workflow : un commit Git vide.
 
-**REQ_CORE_080 (Git Resilience) :**
-Le système MUST interpréter Git exit code **1** avec un message **"nothing to commit"** (ou **"working tree clean"**) comme un **SUCCESS (Warning)**, et non comme une **FATAL ERROR**. Le flux d’exécution DOIT continuer.
+**REQ_CORE_080 (Git Tolerance) :**
+Le système MUST tolérer les réponses Git **"nothing to commit"** (ou **"working tree clean"**) lorsque `git commit` retourne un **exit code 1**.
+Dans ce cas, le wrapper DOIT :
+* loguer l’événement comme **info/warning**,
+* et **CONTINUER l’exécution** (soft success),
+* au lieu de lever une exception fatale.
 
 **Rationale :**
 Dans un wrapper "artifact-first", il est possible que des fichiers aient été copiés/validés mais que le contenu final soit identique (ex: re-génération identique, acceptation de diff vide, normalisation). Git peut alors retourner `1` pour `git commit` avec un message indiquant qu’il n’y a rien à committer. Ce cas est attendu et ne doit pas empêcher :
@@ -376,7 +380,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_AUDIT_003 | AUDIT | Un bundle de preuves (résumé, logs, diffs, erreurs) DOIT être produit à chaque exécution locale pour feedback à l’IA. | P1 |
 | REQ_CORE_016 | CORE | Sécurité d’exécution : le wrapper peut proposer des commandes/scripts, mais l’exécution réelle DOIT rester contrôlée (validation explicite). | P0 |
 | REQ_CORE_050 | Core / Security | **Safe Local Execution :** The system MUST possess a restricted interface to execute read-only system commands (e.g., directory listing, git status) to verify ground truth state. This interface MUST strictly block destructive commands (rm, mv, chmod, etc.) and sanitize inputs. | P0 |
-| REQ_CORE_080 | CORE | **Git Resilience :** Le système DOIT gérer les commits Git vides de manière robuste. Si `git commit` rapporte “nothing to commit” / “working tree clean”, le wrapper DOIT loguer un avertissement et **continuer l’exécution** (pas de crash). | P0 |
+| REQ_CORE_080 | CORE | **Git Tolerance :** Le système MUST tolérer les réponses Git “nothing to commit” / “working tree clean” (exit code 1 sur `git commit`), loguer un info/warning et **continuer l’exécution** (soft success), sans lever d’exception fatale. | P0 |
 | REQ_AUDIT_004 | AUDIT | Toute commande/script proposé(e) DOIT être enregistré(e) dans les artefacts. | P0 |
 | REQ_UX_003 | UX | Toute commande/script proposé(e) DOIT être accompagné(e) d’un contexte (“pourquoi”, “impact”). | P1 |
 | REQ_CORE_017 | CORE | Une commande/script proposé(e) DOIT être exécutable seulement après validation explicite. | P0 |

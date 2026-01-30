@@ -4,75 +4,72 @@ from typing import Iterable
 from src.console import GLOBAL_CONSOLE
 
 
-def run_git_command(args: list[str], cwd: str | None = None) -> subprocess.CompletedProcess:
-    """Run a git command with captured output.
+def run_git_command(command_list: list[str], cwd: str | None = None) -> bool:
+    """Run a git command with REQ_CORE_080 tolerance.
 
-    Always uses check=False so callers can interpret return codes.
+    CRITICAL BEHAVIOR:
+      - Uses check=False to avoid auto-raising and aborting the tool loop.
+      - Treats `git commit` exit code 1 with "nothing to commit" / "working tree clean"
+        as a soft success (logs info/warning and continues).
+
+    Returns:
+      True on success (including tolerant "nothing to commit"), otherwise raises.
+
+    Note:
+      This function is intentionally opinionated for the wrapper's Git workflow.
     """
-    return subprocess.run(
-        ["git", *args],
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=cwd,
-    )
+    command_list = list(command_list or [])
+    if not command_list:
+        raise ValueError("run_git_command: empty command_list")
 
+    # ... existing setup ...
 
-def _combined_git_output(proc: subprocess.CompletedProcess) -> str:
-    out = (proc.stdout or "")
-    err = (proc.stderr or "")
-    return f"{out}\n{err}".lower()
+    # CRITICAL CHANGE: check=False to prevent auto-crash
+    result = subprocess.run(command_list, capture_output=True, text=True, check=False, cwd=cwd)
+
+    if result.returncode == 0:
+        return True  # Success
+
+    stdout_l = (result.stdout or "").lower()
+
+    # Handle "Nothing to commit" as Success
+    if result.returncode == 1 and (
+        ("nothing to commit" in stdout_l) or ("working tree clean" in stdout_l)
+    ):
+        # Keep message close to requested behavior; use console manager for transcript.
+        GLOBAL_CONSOLE.print("ℹ️  Git: Nothing to commit. Proceeding...")
+        return True  # FORCE SUCCESS
+
+    # Real Error Handling
+    err = (result.stderr or "").strip() or (result.stdout or "").strip()
+    if err:
+        GLOBAL_CONSOLE.error(f"❌ Git Error: {err}")
+    else:
+        GLOBAL_CONSOLE.error("❌ Git Error: Unknown error")
+
+    raise subprocess.CalledProcessError(result.returncode, command_list, output=result.stdout, stderr=result.stderr)
 
 
 def git_commit_resilient(commit_message: str, cwd: str | None = None) -> bool:
-    """Run `git commit -m <msg>` with REQ_CORE_080 resilience.
+    """Commit with tolerance for empty commits (REQ_CORE_080).
 
-    Rules:
-      - returncode == 0: success
-      - returncode == 1 AND output contains "nothing to commit" OR "working tree clean":
-          log warning and return True (soft success)
-      - else: return False
-
-    This function MUST NOT raise for the "nothing to commit" case.
+    This delegates to run_git_command so the tolerance logic is centralized.
     """
-    proc = run_git_command(["commit", "-m", commit_message], cwd=cwd)
-
-    if proc.returncode == 0:
-        return True
-
-    if proc.returncode == 1:
-        combined = _combined_git_output(proc)
-        if ("nothing to commit" in combined) or ("working tree clean" in combined):
-            # Required exact log message per user request
-            GLOBAL_CONSOLE.print("[Git] ⚠️ Nothing to commit (clean tree). Proceeding...")
-            return True
-
-    details = (proc.stderr or proc.stdout or "").strip()
-    if details:
-        GLOBAL_CONSOLE.error(
-            f"[Git] Commit failed (rc={proc.returncode}). Details: {details}"
-        )
-    else:
-        GLOBAL_CONSOLE.error(f"[Git] Commit failed (rc={proc.returncode}).")
-    return False
+    try:
+        return run_git_command(["git", "commit", "-m", commit_message], cwd=cwd)
+    except subprocess.CalledProcessError:
+        return False
 
 
 def git_run_ok(args: list[str], cwd: str | None = None) -> bool:
-    """Run an arbitrary git command and return True on rc==0, else False."""
-    proc = run_git_command(args, cwd=cwd)
-    if proc.returncode == 0:
-        return True
+    """Run an arbitrary git subcommand and return True on success.
 
-    details = (proc.stderr or proc.stdout or "").strip()
-    if details:
-        GLOBAL_CONSOLE.error(
-            f"[Git] Command failed: git {' '.join(args)} (rc={proc.returncode}). Details: {details}"
-        )
-    else:
-        GLOBAL_CONSOLE.error(
-            f"[Git] Command failed: git {' '.join(args)} (rc={proc.returncode})."
-        )
-    return False
+    This uses run_git_command and converts exceptions to False.
+    """
+    try:
+        return run_git_command(["git", *list(args or [])], cwd=cwd)
+    except subprocess.CalledProcessError:
+        return False
 
 
 def git_add_force_tracked_paths(paths: Iterable[str], cwd: str | None = None) -> bool:

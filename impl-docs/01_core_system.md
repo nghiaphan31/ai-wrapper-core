@@ -136,38 +136,31 @@ Le prompt système (dans `src/main.py`) informe explicitement le modèle :
 
 **Remarque :** l’outillage SSI est un mécanisme de sécurité et d’observation. Il ne remplace pas la gouvernance (Trinity Protocol) ni la validation humaine pour les actions à impact.
 
-### 1.6 Git Resilience (REQ_CORE_080)
-Albert applique une politique de **résilience Git** pour éviter que le workflow ne casse sur un cas courant : `git commit` sans changements.
+### 1.6 Version Control — Git Tolerance / Soft Fail (REQ_CORE_080)
+Albert applique une politique de **tolérance Git** pour éviter que le workflow ne casse sur un cas courant : `git commit` sans changements.
 
-#### 1.6.1 Problème ciblé
-Quand les fichiers copiés depuis `artifacts/` vers les chemins versionnés sont identiques (ou quand l’utilisateur a accepté des diffs mais le contenu final est inchangé), Git peut répondre :
-* `nothing to commit`,
-* `working tree clean`,
-* ou équivalent.
+#### 1.6.1 Bug ciblé (CRITICAL FIX)
+Dans certains environnements, `git commit` peut retourner :
+* `returncode = 1`
+* avec un message du type **"nothing to commit"** ou **"working tree clean"**.
 
-Dans ce cas, `git commit` retourne souvent un **exit code 1**. Ce n’est pas une erreur “opérationnelle” du wrapper : c’est un état attendu.
+Si ce code de retour est traité comme une erreur fatale (exception), la boucle d’exécution (notamment la Tool Execution Loop / audits) peut être interrompue prématurément.
 
-#### 1.6.2 Règle implémentée
+#### 1.6.2 Règle implémentée (Soft Fail)
 **REQ_CORE_080 :**
-* Le wrapper exécute `git commit` avec `check=False` et interprète le `returncode`.
-* **Si** `returncode == 0` : succès.
-* **Si** `returncode == 1` **et** la sortie (`stdout` ou `stderr`) contient **"nothing to commit"** ou **"working tree clean"** :
-  * le wrapper logue :
-    * `[Git] ⚠️ Nothing to commit (clean tree). Proceeding...`
-  * et retourne un **succès soft** (Warning).
-* Sinon : erreur réelle (commit échoué) → le wrapper logue une erreur et marque l’étape Git comme `failed`.
+* Les commandes Git sont exécutées avec `check=False`.
+* Si `returncode == 0` : succès.
+* Si `returncode == 1` ET que `stdout` contient **"nothing to commit"** ou **"working tree clean"** :
+  * Albert logue un message d’info/warning (ex: `Git: Nothing to commit. Proceeding...`),
+  * et **force un succès** (soft success) pour ne pas casser le workflow.
+* Sinon : erreur réelle → Albert logue une erreur et remonte l’échec.
 
-#### 1.6.3 Isolation des flux : Tool Loop vs Git
-Le flux d’exécution d’outils (REQ_AUDIT_060) et le flux Git sont isolés par des blocs `try/except` distincts dans `src/main.py` :
-* un warning Git (commit vide) ne doit pas empêcher l’exécution de la tool chain,
-* un échec Git ne doit pas faire crasher le wrapper (il doit rester utilisable),
-* la génération de manifest (REQ_DATA_030) reste **best-effort** en fin de commande.
-
-#### 1.6.4 Module d’implémentation
+#### 1.6.3 Module d’implémentation
 * **Code :** `src/utils.py`
+  * `run_git_command(...)` (tolerance centralisée)
   * `git_commit_resilient(...)`
-  * `git_add_force_tracked_paths(...)`
   * `git_run_ok(...)`
+  * `git_add_force_tracked_paths(...)`
 
 ## 2. Modules Principaux (`src/`)
 
