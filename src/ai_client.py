@@ -112,9 +112,12 @@ class AIClient:
         REQ_CORE_060 (The Trinity Protocol) is enforced here by injecting a mandatory
         instruction block into the system message.
 
+        REQ_AUDIT_060 (Artifact-First Tool Execution) is enforced here by instructing
+        the model to request tool execution via <tool_code> tags.
+
         Note:
-          - This does not replace the existing rules; it appends a strict governance layer.
-          - The runtime side (src/main.py) also performs a best-effort warning check.
+          - This does not replace the existing rules; it appends strict governance layers.
+          - Runtime enforcement is implemented in src/main.py.
         """
         base = (base_system_prompt or "").rstrip()
 
@@ -127,14 +130,21 @@ class AIClient:
             "Failure to align all three layers is a critical error.\n"
         )
 
-        return f"{base}{trinity_block}"
+        tool_usage_block = (
+            "\n"
+            "TOOL USAGE: If you need to inspect the environment (e.g., for an audit), DO NOT answer directly. "
+            "Instead, generate a Python script wrapped strictly in <tool_code> ... </tool_code> tags. "
+            "This script will be audited, executed, and its output returned to you.\n"
+        )
+
+        return f"{base}{trinity_block}{tool_usage_block}"
 
     def send_chat_request(self, system_prompt: str, user_prompt: str) -> tuple[str, dict]:
         """Envoie une requête à l'IA, logue tout (Raw + Ledger), et retourne (content, usage_stats)."""
         request_id = str(uuid.uuid4())
         timestamp = datetime.now().isoformat()
 
-        # REQ_CORE_060: ensure the final system prompt includes Trinity Protocol block.
+        # REQ_CORE_060 + REQ_AUDIT_060: ensure the final system prompt includes governance blocks.
         system_prompt = self.build_system_prompt(system_prompt)
 
         # 1. Préparation de la payload

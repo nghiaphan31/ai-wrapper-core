@@ -7,6 +7,7 @@ import difflib
 import shutil
 import shlex
 import uuid
+import re
 from datetime import datetime
 from pathlib import Path
 from src.config import GLOBAL_CONFIG
@@ -542,6 +543,184 @@ def _trinity_protocol_consistency_check(generated_artifacts: list[str]) -> None:
         print("Please verify alignment manually or ask for a retrofit.")
 
 
+def _extract_tool_code(ai_text: str) -> str | None:
+    """Extract python code wrapped in <tool_code>...</tool_code> tags.
+
+    REQ_AUDIT_060: tool execution must be artifact-first and transparent.
+
+    Returns:
+      - code string if tag found and non-empty
+      - None otherwise
+    """
+    if not ai_text:
+        return None
+
+    m = re.search(r"<tool_code>(.*?)</tool_code>", ai_text, flags=re.DOTALL | re.IGNORECASE)
+    if not m:
+        return None
+
+    code = (m.group(1) or "").strip("\n\r\t ")
+    return code if code.strip() else None
+
+
+def _run_tool_script_and_capture(project_root: Path, script_path: Path, timeout_s: int = 20) -> tuple[int, str, str]:
+    """Execute a python tool script with safety defaults.
+
+    Safety:
+      - Uses sys.executable (current python)
+      - No shell=True
+      - Timeout enforced
+      - cwd set to project root
+
+    Returns:
+      (returncode, stdout, stderr)
+    """
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(project_root),
+            timeout=timeout_s,
+        )
+        return int(proc.returncode), (proc.stdout or ""), (proc.stderr or "")
+    except subprocess.TimeoutExpired as e:
+        out = (getattr(e, "stdout", None) or "")
+        err = (getattr(e, "stderr", None) or "")
+        err = (err + "\n" if err else "") + f"[WRAPPER] Tool script timed out after {timeout_s}s"
+        return 124, out, err
+    except Exception as e:
+        return 1, "", f"[WRAPPER] Tool script execution failed: {e}"
+
+
+def _append_system_message_to_transcript(text: str) -> None:
+    """Log a system message to transcript.
+
+    Requirement mapping:
+      - REQ_AUDIT_060 feedback loop requires the system message to be logged to transcript.txt.
+        (Implementation uses transcript.log file via GLOBAL_CONSOLE.print.)
+
+    Uses GLOBAL_CONSOLE.print to ensure consistent transcript capture.
+    """
+    GLOBAL_CONSOLE.print(text)
+
+
+def _process_tool_code_loop(client: AIClient, initial_ai_text: str) -> str:
+    """Process <tool_code> requests recursively until no tool code is present.
+
+    REQ_AUDIT_060 Glass Box loop:
+      1) Detect <tool_code>
+      2) Extract python code
+      3) Artifact 1: save tool_script.py under artifacts/step_<timestamp>_tool_request/
+      4) Execute script
+      5) Artifact 2: save stdout+stderr to tool_output.txt in same folder
+      6) Feedback loop: automatically send new message to AI with tool output
+
+    Notes:
+      - This loop does not wait for user input.
+      - Artifacts are tracked by GLOBAL_ARTIFACTS for inclusion in session manifest.
+      - To avoid infinite loops, a hard max iteration count is enforced.
+    """
+    ai_text = initial_ai_text or ""
+    max_iters = 5
+
+    for _ in range(max_iters):
+        code = _extract_tool_code(ai_text)
+        if not code:
+            return ai_text
+
+        # Step folder naming: step_<timestamp>_tool_request (per user requirement)
+        step_id = f"step_{datetime.now().strftime('%Y%m%d_%H%M%S')}_tool_request"
+        step_dir = GLOBAL_CONFIG.project_root / "artifacts" / step_id
+
+        try:
+            step_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            # If we cannot create artifacts, we must not execute (transparency requirement)
+            msg = f"[WRAPPER] REQ_AUDIT_060: Cannot create tool artifact folder {step_dir}: {e}"
+            GLOBAL_CONSOLE.error(msg)
+            return ai_text
+
+        script_path = step_dir / "tool_script.py"
+        out_path = step_dir / "tool_output.txt"
+
+        # Artifact 1: write script BEFORE execution
+        try:
+            script_path.write_text(code + "\n", encoding="utf-8")
+            # Track as session artifact
+            try:
+                GLOBAL_ARTIFACTS._session_artifacts.append(str(script_path.relative_to(GLOBAL_CONFIG.project_root)))
+            except Exception:
+                GLOBAL_ARTIFACTS._session_artifacts.append(str(script_path))
+
+            GLOBAL_LEDGER.log_event(
+                actor="wrapper",
+                action_type="file_write",
+                artifacts=[str(script_path)],
+            )
+        except Exception as e:
+            msg = f"[WRAPPER] REQ_AUDIT_060: Failed to write tool script artifact {script_path}: {e}"
+            GLOBAL_CONSOLE.error(msg)
+            return ai_text
+
+        # Execute
+        rc, stdout, stderr = _run_tool_script_and_capture(
+            project_root=GLOBAL_CONFIG.project_root,
+            script_path=script_path,
+            timeout_s=20,
+        )
+
+        # Artifact 2: write output AFTER execution
+        combined = "".join(
+            [
+                f"returncode: {rc}\n",
+                "\n[STDOUT]\n",
+                stdout,
+                "\n[STDERR]\n",
+                stderr,
+            ]
+        )
+
+        try:
+            out_path.write_text(combined, encoding="utf-8")
+            # Track as session artifact
+            try:
+                GLOBAL_ARTIFACTS._session_artifacts.append(str(out_path.relative_to(GLOBAL_CONFIG.project_root)))
+            except Exception:
+                GLOBAL_ARTIFACTS._session_artifacts.append(str(out_path))
+
+            GLOBAL_LEDGER.log_event(
+                actor="wrapper",
+                action_type="exec_command",
+                artifacts=[str(out_path)],
+            )
+        except Exception as e:
+            # If output cannot be saved, we still stop the loop (cannot prove execution)
+            msg = f"[WRAPPER] REQ_AUDIT_060: Failed to write tool output artifact {out_path}: {e}"
+            GLOBAL_CONSOLE.error(msg)
+            return ai_text
+
+        # Feedback loop: automatically send system message to AI
+        system_feedback = f"System: Tool executed. Artifacts saved. Output:\n{combined}"
+        _append_system_message_to_transcript(system_feedback)
+
+        # Send next request with tool output as the user prompt.
+        # (We keep system prompt constant; the AIClient will append Trinity + Tool instructions.)
+        try:
+            ai_text, _usage_stats = client.send_chat_request(
+                system_prompt=SYSTEM_PROMPT_ARCHITECT,
+                user_prompt=system_feedback,
+            )
+        except Exception as e:
+            GLOBAL_CONSOLE.error(f"[WRAPPER] Failed to send tool feedback to AI: {e}")
+            return ai_text
+
+    # If max iters exceeded, return last response
+    GLOBAL_CONSOLE.error("[WRAPPER] Tool loop aborted: max iterations reached.")
+    return ai_text
+
+
 def main():
     # Tool identity header (explicit, independent from project.json naming)
     GLOBAL_CONSOLE.print("--- ALBERT (Your Personal AI Steward) ---")
@@ -641,6 +820,9 @@ def main():
                     system_prompt=SYSTEM_PROMPT_ARCHITECT,
                     user_prompt=full_user_prompt,
                 )
+
+                # REQ_AUDIT_060: Artifact-first tool execution loop (no user input)
+                json_response = _process_tool_code_loop(client=client, initial_ai_text=json_response)
 
                 # 5. Écriture des artefacts
                 step_id = _generate_step_id()
