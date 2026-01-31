@@ -12,7 +12,7 @@ Un wrapper local Linux (fonctionnant sur une machine unique : NUC ou Calypso) qu
 * Environnement : Linux, usage “local-first”.
 * Interaction : orientée projets et sessions datées.
 * Le wrapper doit pouvoir fonctionner dans un contexte “simple écran / confort limité terminal” : priorité à des sorties courtes, des résumés et des artefacts consultables plutôt que des interactions qui exigent de scroller énormément.
-* La facturation et l’accès IA via API sont distincts des abonnements UI (ChatGPT Plus / Gemini Pro, etc.) → le wrapper doit être conçu pour un usage API.
+* La facturation est l’accès IA via API sont distincts des abonnements UI (ChatGPT Plus / Gemini Pro, etc.) → le wrapper doit être conçu pour un usage API.
 * Garantie "Zéro Copy-Paste" : L'utilisateur ne doit JAMAIS avoir besoin de copier-coller du code depuis la sortie terminal vers un fichier. Le transfert du code généré vers le système de fichiers local doit être 100% automatisé par le wrapper pour garantir l'intégrité binaire (indentation, caractères spéciaux).
 
 ## 3) IA “tout-en-un” (intégration unique)
@@ -43,6 +43,8 @@ Arborescence racine : `~/ai-work/projects/<project_slug>/`
 * `specs/` [GIT] : Cahier des charges techniques et évolutions fonctionnelles.
 * `impl-docs/` [GIT] : Documentation technique vivante (auto-générée ou maintenue).
 * `notes/` [GIT] : Mémoire contextuelle long-terme (summary.md, decisions.md, todo.md).
+* `workbench/` [GIT] : Espace de *stewardship tooling* pour scripts opérationnels (audit, maintenance) versionnés mais distincts du livrable `src/`.
+  * `workbench/scripts/` [GIT] : Scripts opérationnels exécutables manuellement (audit/maintenance). Voir **REQ_ARCH_020**.
 * `secrets/` [NO GIT] : API Keys, configurations spécifiques à la machine locale. Doit être dans .gitignore.
 * `sessions/` [NO GIT] : Historique volumineux. Contient désormais pour chaque session :
     * `transcript.log` : Copie intégrale des E/S terminal (User <-> Wrapper).
@@ -79,6 +81,15 @@ Dans un wrapper "artifact-first", il est possible que des fichiers aient été c
 * l’exécution d’outils (audit/inspection),
 * la génération de manifests,
 * ou la continuation de la session.
+
+### 5.2 The Workbench Setup (REQ_ARCH_020)
+**REQ_ARCH_020 (The Workbench) :**
+Les scripts opérationnels (Audit, Maintenance) MUST être stockés dans `workbench/scripts/`. Ils sont distincts de `src/` mais versionnés.
+
+**Rationale :**
+* Éviter la confusion entre livrable applicatif (`src/`) et outillage d’intendance.
+* Réduire les erreurs de parsing “Artifact/Tooling” en donnant un emplacement stable et permanent aux scripts d’audit/maintenance.
+* Permettre l’exécution manuelle immédiate de scripts d’inspection, tout en les gardant sous contrôle Git.
 
 ## 6) Workflow Séquentiel (Cycle de Vie)
 Le travail est strictement divisé en deux phases distinctes.
@@ -365,6 +376,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_DATA_012 | DATA | Règle de versioning : séparation stricte entre code+docs versionnés et données opérationnelles locales (sessions/logs/artefacts). | P0 |
 | REQ_DATA_013 | DATA | Flux de production : l’IA génère des propositions dans `artifacts/` ou `outputs/` ; après validation humaine, les fichiers sont déplacés/mergés dans `src/` et commités. | P0 |
 | REQ_DATA_014 | DATA | Protection Git : le `.gitignore` racine DOIT utiliser une stratégie “Deny All / Allow Specific” (ignorer `*` par défaut et autoriser explicitement uniquement les dossiers versionnés) pour éviter la pollution accidentelle par logs/artefacts. | P0 |
+| REQ_ARCH_020 | ARCH | **The Workbench :** Operational scripts (Audit, Maintenance) MUST be stored in `workbench/scripts/`. They are distinct from `src/` but versioned. | P0 |
 | REQ_CORE_008 | CORE | Le workflow DOIT être scindé strictement en deux phases : Phase A (Définition & Spécification) et Phase B (Implémentation & Itération). | P0 |
 | REQ_CORE_009 | CORE | Phase A : l’IA agit comme Architecte/Business Analyst ; la sortie DOIT être des fichiers Markdown dans `specs/`. | P0 |
 | REQ_CORE_010 | CORE | Phase A : il est INTERDIT d’écrire du code dans `src/` ou `impl-docs/`. | P0 |

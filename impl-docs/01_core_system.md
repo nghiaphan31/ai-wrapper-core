@@ -13,7 +13,22 @@ Albert n’est pas un simple "chat" : il orchestre le workflow, écrit les artef
 
 Le noyau (Core) gère l'initialisation, la configuration et, surtout, la traçabilité des opérations. Il fournit également une boucle CLI interactive et les points d’entrée de workflow (`test_ai`, `implement`).
 
-### 1.1 Audit Ledger System (Traceabilité + Coûts)
+### 1.1 Workbench (Stewardship Tooling) — REQ_ARCH_020
+Le dépôt inclut un dossier **`workbench/`** destiné aux outils d’intendance (*stewardship tools*) : scripts d’audit, maintenance, inspection structurelle, etc.
+
+**Principe (REQ_ARCH_020) :**
+* Les scripts opérationnels MUST être stockés dans `workbench/scripts/`.
+* Ils sont **versionnés** (Git) mais **distincts** du livrable applicatif dans `src/`.
+
+**Objectif :** fournir un “home” permanent pour l’outillage opérationnel afin d’éviter la confusion entre :
+* code produit/livrable (`src/`),
+* scripts d’audit/maintenance (workbench),
+* scripts temporaires générés pour exécution Artifact-First (`artifacts/.../tool_script.py`).
+
+Exemple :
+* `workbench/scripts/structural_audit.py` : script exécutable manuellement pour imprimer l’arborescence et lister les dossiers vides.
+
+### 1.2 Audit Ledger System (Traceabilité + Coûts)
 En plus du ledger événementiel (machine-level), Albert maintient désormais un **Audit Ledger** orienté "transactions" pour assurer une traçabilité directe des opérations et des coûts.
 
 * **Fichier :** `audit_log.jsonl` à la racine du projet (append-only)
@@ -22,7 +37,7 @@ En plus du ledger événementiel (machine-level), Albert maintient désormais un
 
 > Le ledger événementiel (`ledger/events.jsonl`) reste la source de vérité pour les événements fins (api_response, file_write, etc.). L'audit ledger (`audit_log.jsonl`) est un résumé transactionnel orienté comptabilité.
 
-### 1.2 Financial & Operational Reporting (Visibility Gap Closure)
+### 1.3 Financial & Operational Reporting (Visibility Gap Closure)
 Albert inclut désormais une capacité de **reporting agrégé** pour combler le manque de visibilité sur les tokens et les coûts.
 
 * **Commande CLI :** `report`
@@ -30,7 +45,7 @@ Albert inclut désormais une capacité de **reporting agrégé** pour combler le
 * **Sortie console :** un tableau de bord concis (transactions, tokens in/out, coût estimé, chemin du ledger)
 * **Tolérance :** si le ledger est absent ou vide, le rapport affiche des zéros (pas de crash).
 
-### 1.3 Traceability Management
+### 1.4 Traceability Management
 Albert applique une gouvernance stricte d’alignement entre trois couches :
 
 1) **Specs (Requirements)** — `specs/`
@@ -45,32 +60,32 @@ Albert applique une gouvernance stricte d’alignement entre trois couches :
    * décrit l’état réel du code (ce qui est effectivement codé)
    * sert de “carte” opérationnelle : modules, flux, formats de logs, localisation des artefacts
 
-#### 1.3.1 Matrice de Traçabilité = Source de Vérité
+#### 1.4.1 Matrice de Traçabilité = Source de Vérité
 Le fichier **`traceability_matrix.md`** (à la racine du projet) est la **Source of Truth** qui relie explicitement :
 - un **Req_ID** (Specs),
 - les **modules `src/`** concernés,
 - la **documentation `impl-docs/`** correspondante,
 - et un **statut** (Implemented / Partial / Planned).
 
-#### 1.3.2 Règle de maintenance (cycle de vie)
+#### 1.4.2 Règle de maintenance (cycle de vie)
 À chaque changement significatif :
 - si du code est modifié/ajouté dans `src/`, la doc correspondante **doit** être mise à jour dans `impl-docs/` (Definition of Done),
 - et la **ligne correspondante** dans `traceability_matrix.md` **doit** être mise à jour (statut + liens).
 
-#### 1.3.3 Gestion des écarts
+#### 1.4.3 Gestion des écarts
 - Si une fonctionnalité est implémentée mais **sans Req_ID**, il faut **mettre à jour les Specs d’abord** (ajout au registre d’exigences) avant de considérer la feature « conforme ». Cela maintient l’alignement *Specs ↔ Code ↔ Impl-Docs*.
 
-### 1.4 Governance: The Trinity Protocol (REQ_CORE_060)
+### 1.5 Governance: The Trinity Protocol (REQ_CORE_060)
 Albert institutionnalise une gouvernance stricte appelée **The Trinity Protocol** : l’alignement permanent entre **Specs**, **Code**, et **Docs**.
 
-#### 1.4.1 Principe
+#### 1.5.1 Principe
 Toute modification d’une couche (**Specs**, **Code**, ou **Docs**) DOIT déclencher une évaluation des deux autres.
 
 * **Code Change (`src/`)** → nécessite une mise à jour correspondante dans `impl-docs/` et peut nécessiter un retrofit dans `specs/`.
 * **Spec Change (`specs/`)** → nécessite une implémentation dans `src/` et une mise à jour dans `impl-docs/`.
 * **Doc Change (`impl-docs/`)** → DOIT refléter le comportement réel du code et les exigences des specs.
 
-#### 1.4.2 Mécanisme 1 : Enforcement via System Prompt
+#### 1.5.2 Mécanisme 1 : Enforcement via System Prompt
 Le système renforce ce protocole au niveau du modèle via le **System Prompt**.
 
 * **Où :** `src/ai_client.py`
@@ -80,7 +95,7 @@ Le système renforce ce protocole au niveau du modèle via le **System Prompt**.
 
 Objectif : rendre l’IA *steward* de l’écosystème, pas seulement générateur de fichiers.
 
-#### 1.4.3 Mécanisme 2 : Runtime Warnings (best-effort)
+#### 1.5.3 Mécanisme 2 : Runtime Warnings (best-effort)
 En complément, Albert effectue un contrôle **best-effort** au runtime dans le flux `implement`.
 
 * **Où :** `src/main.py` (commande `implement`)
@@ -89,7 +104,7 @@ En complément, Albert effectue un contrôle **best-effort** au runtime dans le 
 
 Ce mécanisme ne bloque pas l’exécution (pas de hard stop), car certaines sessions peuvent volontairement produire du code « en avance » avant retrofit. L’objectif est d’éviter les dérives silencieuses.
 
-#### 1.4.4 Philosophie “Retrofit” (Reality → Theory)
+#### 1.5.4 Philosophie “Retrofit” (Reality → Theory)
 Le protocole assume une philosophie explicite :
 
 *La réalité (Code) doit alimenter la théorie (Specs).* 
@@ -98,17 +113,17 @@ Quand le code révèle un besoin non spécifié, on **retrofit** les specs : ajo
 
 > Corollaire : une doc d’implémentation fidèle (impl-docs) est le miroir nécessaire pour diagnostiquer et corriger tout écart Specs ↔ Code.
 
-### 1.5 Safe System Inspection (SSI) — REQ_CORE_050
+### 1.6 Safe System Inspection (SSI) — REQ_CORE_050
 Albert inclut un mécanisme de **Safe System Inspection (SSI)** permettant au système (et donc à l’IA via le wrapper) d’effectuer des **observations empiriques** de l’environnement local (Ground Truth) sans mettre en danger la stabilité du système.
 
 **But :** autoriser des commandes **read-only** (inspection) afin de vérifier la réalité (structure de projet, état git, lecture de fichiers) avant de faire des hypothèses.
 
-#### 1.5.1 Module
+#### 1.6.1 Module
 * **Code :** `src/system_tools.py`
 * **Classe :** `SafeCommandRunner`
 * **Méthode :** `run_safe_command(command_str)`
 
-#### 1.5.2 Allowlist (commandes autorisées)
+#### 1.6.2 Allowlist (commandes autorisées)
 Allowlist stricte (préfixes exacts) :
 * `tree`
 * `ls`
@@ -122,7 +137,7 @@ Allowlist stricte (préfixes exacts) :
 
 > Les entrées multi-mots (ex: `git status`) doivent matcher le **préfixe exact** des tokens (`["git","status", ...]`).
 
-#### 1.5.3 Contraintes de sécurité
+#### 1.6.3 Contraintes de sécurité
 SSI applique des garde-fous conservateurs :
 * **Interdiction des opérateurs de chaînage / redirection :** rejet si la commande contient `&&`, `;`, `|`, `>`.
   * Objectif : empêcher l’injection shell, le piping vers des commandes non allowlistées, et les écritures via redirection.
@@ -130,23 +145,23 @@ SSI applique des garde-fous conservateurs :
 * **Parsing robuste :** split via `shlex.split`.
 * **Blocage implicite des commandes destructrices :** `rm`, `mv`, `chmod`, etc. ne sont pas allowlistées, donc refusées.
 
-#### 1.5.4 Intégration dans le System Prompt
+#### 1.6.4 Intégration dans le System Prompt
 Le prompt système (dans `src/main.py`) informe explicitement le modèle :
 > “You have access to a `run_safe_command` tool to inspect the file system (ls, tree) and git status. Use this to verify reality before making assumptions.”
 
 **Remarque :** l’outillage SSI est un mécanisme de sécurité et d’observation. Il ne remplace pas la gouvernance (Trinity Protocol) ni la validation humaine pour les actions à impact.
 
-### 1.6 Version Control — Git Tolerance / Soft Fail (REQ_CORE_080)
+### 1.7 Version Control — Git Tolerance / Soft Fail (REQ_CORE_080)
 Albert applique une politique de **tolérance Git** pour éviter que le workflow ne casse sur un cas courant : `git commit` sans changements.
 
-#### 1.6.1 Bug ciblé (CRITICAL FIX)
+#### 1.7.1 Bug ciblé (CRITICAL FIX)
 Dans certains environnements, `git commit` peut retourner :
 * `returncode = 1`
 * avec un message du type **"nothing to commit"** ou **"working tree clean"**.
 
 Si ce code de retour est traité comme une erreur fatale (exception), la boucle d’exécution (notamment la Tool Execution Loop / audits) peut être interrompue prématurément.
 
-#### 1.6.2 Règle implémentée (Soft Fail)
+#### 1.7.2 Règle implémentée (Soft Fail)
 **REQ_CORE_080 :**
 * Les commandes Git sont exécutées avec `check=False`.
 * Si `returncode == 0` : succès.
@@ -155,7 +170,7 @@ Si ce code de retour est traité comme une erreur fatale (exception), la boucle 
   * et **force un succès** (soft success) pour ne pas casser le workflow.
 * Sinon : erreur réelle → Albert logue une erreur et remonte l’échec.
 
-#### 1.6.3 Module d’implémentation
+#### 1.7.3 Module d’implémentation
 * **Code :** `src/utils.py`
   * `run_git_command(...)` (tolerance centralisée)
   * `git_commit_resilient(...)`
