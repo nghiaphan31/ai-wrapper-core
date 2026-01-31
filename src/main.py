@@ -177,7 +177,14 @@ def review_and_apply(artifact_folder: str | Path, commit_message: str) -> bool:
 
     project_root = GLOBAL_CONFIG.project_root
 
-    artifact_files: list[Path] = [p for p in artifact_folder.rglob("*") if p.is_file()]
+    all_files = [p for p in artifact_folder.rglob("*") if p.is_file()]
+    
+    # On exclut les fichiers .meta.json et les traces brutes
+    artifact_files = [
+        p for p in all_files 
+        if not p.name.endswith(".meta.json") 
+        and p.name != "raw_response_trace.jsonl"
+    ]
     artifact_files.sort(key=lambda p: str(p))
 
     if not artifact_files:
