@@ -435,18 +435,6 @@ def _trinity_protocol_consistency_check(generated_artifacts: list[str]) -> None:
         print("Please verify alignment manually or ask for a retrofit.")
 
 
-def _extract_tool_code(ai_text: str) -> str | None:
-    if not ai_text:
-        return None
-
-    m = re.search(r"<tool_code>(.*?)</tool_code>", ai_text, flags=re.DOTALL | re.IGNORECASE)
-    if not m:
-        return None
-
-    code = (m.group(1) or "").strip("\n\r\t ")
-    return code if code.strip() else None
-
-
 def _run_tool_script_and_capture(project_root: Path, script_path: Path, timeout_s: int = 20) -> tuple[int, str, str]:
     try:
         proc = subprocess.run(
@@ -469,94 +457,6 @@ def _run_tool_script_and_capture(project_root: Path, script_path: Path, timeout_
 
 def _append_system_message_to_transcript(text: str) -> None:
     GLOBAL_CONSOLE.print(text)
-
-
-def _process_tool_code_loop(client: AIClient, initial_ai_text: str) -> str:
-    ai_text = initial_ai_text or ""
-    max_iters = 5
-
-    for _ in range(max_iters):
-        code = _extract_tool_code(ai_text)
-        if not code:
-            return ai_text
-
-        step_id = f"step_{datetime.now().strftime('%Y%m%d_%H%M%S')}_tool_request"
-        step_dir = GLOBAL_CONFIG.project_root / "artifacts" / step_id
-
-        try:
-            step_dir.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            msg = f"[WRAPPER] REQ_AUDIT_060: Cannot create tool artifact folder {step_dir}: {e}"
-            GLOBAL_CONSOLE.error(msg)
-            return ai_text
-
-        script_path = step_dir / "tool_script.py"
-        out_path = step_dir / "tool_output.txt"
-
-        try:
-            script_path.write_text(code + "\n", encoding="utf-8")
-            try:
-                GLOBAL_ARTIFACTS._session_artifacts.append(str(script_path.relative_to(GLOBAL_CONFIG.project_root)))
-            except Exception:
-                GLOBAL_ARTIFACTS._session_artifacts.append(str(script_path))
-
-            GLOBAL_LEDGER.log_event(
-                actor="wrapper",
-                action_type="file_write",
-                artifacts=[str(script_path)],
-            )
-        except Exception as e:
-            msg = f"[WRAPPER] REQ_AUDIT_060: Failed to write tool script artifact {script_path}: {e}"
-            GLOBAL_CONSOLE.error(msg)
-            return ai_text
-
-        rc, stdout, stderr = _run_tool_script_and_capture(
-            project_root=GLOBAL_CONFIG.project_root,
-            script_path=script_path,
-            timeout_s=20,
-        )
-
-        combined = "".join(
-            [
-                f"returncode: {rc}\n",
-                "\n[STDOUT]\n",
-                stdout,
-                "\n[STDERR]\n",
-                stderr,
-            ]
-        )
-
-        try:
-            out_path.write_text(combined, encoding="utf-8")
-            try:
-                GLOBAL_ARTIFACTS._session_artifacts.append(str(out_path.relative_to(GLOBAL_CONFIG.project_root)))
-            except Exception:
-                GLOBAL_ARTIFACTS._session_artifacts.append(str(out_path))
-
-            GLOBAL_LEDGER.log_event(
-                actor="wrapper",
-                action_type="exec_command",
-                artifacts=[str(out_path)],
-            )
-        except Exception as e:
-            msg = f"[WRAPPER] REQ_AUDIT_060: Failed to write tool output artifact {out_path}: {e}"
-            GLOBAL_CONSOLE.error(msg)
-            return ai_text
-
-        system_feedback = f"System: Tool executed. Artifacts saved. Output:\n{combined}"
-        _append_system_message_to_transcript(system_feedback)
-
-        try:
-            ai_text, _usage_stats = client.send_chat_request(
-                system_prompt=SYSTEM_PROMPT_ARCHITECT,
-                user_prompt=system_feedback,
-            )
-        except Exception as e:
-            GLOBAL_CONSOLE.error(f"[WRAPPER] Failed to send tool feedback to AI: {e}")
-            return ai_text
-
-    GLOBAL_CONSOLE.error("[WRAPPER] Tool loop aborted: max iterations reached.")
-    return ai_text
 
 
 def main():
@@ -654,8 +554,6 @@ def main():
                         system_prompt=SYSTEM_PROMPT_ARCHITECT,
                         user_prompt=full_user_prompt,
                     )
-
-                    json_response = _process_tool_code_loop(client=client, initial_ai_text=json_response)
 
                     step_id = _generate_step_id()
                     files = GLOBAL_ARTIFACTS.process_response(

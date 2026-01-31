@@ -132,10 +132,8 @@ class AIClient:
 
         tool_usage_block = (
             "\n"
-            "TOOL USAGE: If you need to inspect the environment (e.g., for an audit), DO NOT answer directly. "
-            "Instead, generate a Python script wrapped strictly in <tool_code> ... </tool_code> tags. "
-            "This script will be audited, executed, and its output returned to you.\n"
-        )
+	    "DO NOT use XML tags. Use JSON artifacts only."
+		        )
 
         return f"{base}{trinity_block}{tool_usage_block}"
 
