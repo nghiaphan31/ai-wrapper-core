@@ -12,8 +12,8 @@ class AuditLedger:
         # Existing event ledger (spec Section 10.2)
         self.ledger_file = self.project_root / "ledger" / "events.jsonl"
 
-        # New audit ledger for transactions & cost traceability (project root)
-        self.audit_log_file = self.project_root / "audit_log.jsonl"
+        # New audit ledger for transactions & cost traceability
+        self.audit_log_file = self.project_root / "ledger" / "audit_log.jsonl"
 
         self._ensure_ledger_exists()
         self._ensure_audit_log_exists()
