@@ -12,40 +12,30 @@ class ArtifactManager:
     def __init__(self):
         self.project_root = GLOBAL_CONFIG.project_root
         self.artifacts_dir = self.project_root / "artifacts"
-
-        # REQ_DATA_030: Track artifacts written during the current wrapper execution.
         self._session_artifacts: list[str] = []
 
     def _parse_ndjson(self, text: str) -> list[dict]:
-        """
-        NOUVEAU: Parseur robuste pour gérer les flux JSON multiples (NDJSON).
-        Gère le cas où l'IA envoie plusieurs blocs JSON à la suite.
-        """
+        """Parseur robuste NDJSON."""
         results = []
         decoder = json.JSONDecoder()
         pos = 0
         length = len(text)
 
         while pos < length:
-            # Ignorer les espaces blancs
             while pos < length and text[pos].isspace():
                 pos += 1
             if pos >= length:
                 break
-            
             try:
-                # Tente de décoder un objet JSON à partir de la position actuelle
                 obj, end = decoder.raw_decode(text, pos)
                 results.append(obj)
                 pos = end
             except json.JSONDecodeError:
-                # Si échec (ex: texte brut ou préambule), on avance d'un caractère
                 pos += 1
-        
         return results
 
     def calculate_sha256(self, file_path: str | Path) -> str:
-        """(CONSERVÉ) Calculate SHA-256 digest for a file."""
+        """(CONSERVÉ) Calculate SHA-256 digest."""
         p = Path(file_path)
         h = hashlib.sha256()
         try:
@@ -57,7 +47,7 @@ class ArtifactManager:
             return ""
 
     def generate_session_manifest(self, session_id: str) -> Path:
-        """(CONSERVÉ) Generates a JSON manifest listing all artifacts created."""
+        """(CONSERVÉ) Generates a JSON manifest."""
         manifest_dir = self.project_root / "manifests"
         manifest_dir.mkdir(exist_ok=True)
         
@@ -84,15 +74,14 @@ class ArtifactManager:
 
     def process_response(self, session_id: str, step_name: str, raw_text: str) -> list[str]:
         """
-        (MODIFIÉ) Parse la réponse IA (support NDJSON), affiche TOUTES les pensées/messages,
-        sauvegarde la trace brute, et extrait les 'artifacts'.
-        Retourne la liste des fichiers générés.
+        Parse la réponse IA, affiche la réflexion, et écrit les fichiers 
+        EN RESPECTANT L'ARBORESCENCE (ex: artifacts/step_X/specs/doc.md).
         """
         step_dir = self.artifacts_dir / step_name
         step_dir.mkdir(parents=True, exist_ok=True)
         generated_files = []
 
-        # 1. Sauvegarde de la Trace Brute
+        # 1. Sauvegarde Trace
         trace_path = step_dir / "raw_response_trace.jsonl"
         try:
             trace_path.write_text(raw_text, encoding="utf-8")
@@ -106,64 +95,68 @@ class ArtifactManager:
             GLOBAL_CONSOLE.error("⚠️ No valid JSON block found in AI response.")
             return []
 
-        # 3. Traitement du flux
+        # 3. Traitement
         for obj in json_objects:
-            
-            # Affichage Pensées
             if "thought_process" in obj:
                 GLOBAL_CONSOLE.print(f"🧠 [Thought]: {obj['thought_process']}")
-
-            # Affichage Outils
             if "tool" in obj:
                 args = obj.get('args', {})
                 GLOBAL_CONSOLE.print(f"🔧 [Tool Call]: {obj['tool']} {args}")
-
-            # Affichage Message Final
             if "message" in obj:
                 GLOBAL_CONSOLE.print(f"\n🤖 [Message]: {obj['message']}\n")
 
-            # Traitement Artifacts
             if "artifacts" in obj:
                 for artifact in obj["artifacts"]:
-                    path_str = artifact.get("path")
+                    path_str = artifact.get("path") # ex: "specs/10_auto.md"
                     content = artifact.get("content")
                     operation = artifact.get("operation", "create")
 
                     if not path_str or content is None:
                         continue
 
-                    # Écriture dans le dossier STEP (Quarantaine)
-                    safe_path = step_dir / Path(path_str).name
-                    
+                    # --- CORRECTION PATH MANAGEMENT ---
+                    # 1. On combine le dossier step avec le chemin demandé
+                    # 2. On utilise .resolve() pour gérer les ../ éventuels
                     try:
-                        safe_path.write_text(content, encoding="utf-8")
+                        safe_target = (step_dir / path_str).resolve()
+                        step_dir_abs = step_dir.resolve()
+
+                        # Sécurité : Vérifier que le fichier reste dans step_dir
+                        if not str(safe_target).startswith(str(step_dir_abs)):
+                            GLOBAL_CONSOLE.error(f"⛔ Security Alert: Path escape attempt blocked: {path_str}")
+                            continue
+                        
+                        # Création des sous-dossiers (ex: artifacts/step_X/specs/)
+                        safe_target.parent.mkdir(parents=True, exist_ok=True)
+
+                        # Écriture
+                        safe_target.write_text(content, encoding="utf-8")
                         
                         # Meta-data sidecar
                         meta = {
                             "original_path": path_str,
                             "operation": operation,
-                            "local_path": str(safe_path)
+                            "local_path": str(safe_target)
                         }
-                        safe_path.with_suffix(safe_path.suffix + ".meta.json").write_text(
+                        safe_target.with_suffix(safe_target.suffix + ".meta.json").write_text(
                             json.dumps(meta, indent=2), encoding="utf-8"
                         )
 
-                        generated_files.append(str(safe_path))
+                        generated_files.append(str(safe_target))
                         
-                        # Logging Audit (SANS l'argument 'details')
                         GLOBAL_LEDGER.log_event(
                             actor="ai", 
                             action_type="artifact_generated", 
-                            artifacts=[str(safe_path)]
+                            artifacts=[str(safe_target)]
                         )
                         
                         # Tracking
                         try:
-                            rel = str(safe_path.relative_to(self.project_root))
+                            rel = str(safe_target.relative_to(self.project_root))
                             self._session_artifacts.append(rel)
                         except ValueError:
-                            self._session_artifacts.append(str(safe_path))
-                        
+                            self._session_artifacts.append(str(safe_target))
+                            
                     except Exception as e:
                         GLOBAL_CONSOLE.error(f"Failed to write artifact {path_str}: {e}")
 
