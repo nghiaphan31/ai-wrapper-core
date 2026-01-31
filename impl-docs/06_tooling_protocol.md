@@ -1,5 +1,5 @@
 # Documentation Implémentation : Tooling Protocol (Workbench Scripts + Exec)
-**Version :** 0.2.0
+**Version :** 0.2.1
 **Date :** 2026-01-31
 
 ## 1. Objectif
@@ -44,11 +44,18 @@ La génération doit se faire via le protocole JSON standard (REQ_CORE_090), par
 La génération et l’exécution sont **deux étapes distinctes** (REQ_CORE_095).
 
 L’exécution se fait via la commande CLI interactive :
-- `exec <relative_path_under_workbench/scripts>`
+- `exec <relative_path>`
 
-Exemples :
-- `exec structural_audit.py`
-- `exec audits/scan_repo.py`
+**Format attendu (implémentation actuelle) :**
+- le chemin fourni à `exec` est **relatif à la racine projet**,
+- mais doit **résoudre strictement sous** `workbench/scripts/` (sandbox REQ_CORE_055).
+
+Exemples valides :
+- `exec workbench/scripts/structural_audit.py`
+- `exec workbench/scripts/audits/scan_repo.py`
+
+> Note: historiquement, la doc indiquait un chemin relatif à `workbench/scripts/` directement.
+> Le comportement effectif actuel accepte un chemin relatif à la racine projet (ex: `workbench/scripts/...`) tout en conservant la restriction de sécurité (must be under `workbench/scripts/`).
 
 ### 3.3 Sandbox d’exécution (REQ_CORE_055)
 L’exécution est effectuée par `WorkbenchRunner` :

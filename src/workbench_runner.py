@@ -44,12 +44,13 @@ class WorkbenchRunner:
         # Force relative paths (avoid accidental absolute execution)
         p = Path(rel)
         if p.is_absolute():
-            raise ValueError("Absolute paths are forbidden. Provide a path relative to workbench/scripts/.")
+            raise ValueError("Absolute paths are forbidden. Provide a path relative to the project root.")
 
-        # Interpret relative to workbench/scripts
-        candidate = (self.workbench_scripts_dir / p).resolve()
+        # NEW behavior: interpret the provided path as relative to project root.
+        # This allows users to pass e.g. `workbench/scripts/my_script.py`.
+        candidate = (self.project_root / p).resolve()
 
-        # Ensure candidate is within workbench/scripts
+        # Security check (keep): ensure candidate is within workbench/scripts
         try:
             candidate.relative_to(self.workbench_scripts_dir)
         except Exception:
@@ -71,7 +72,7 @@ class WorkbenchRunner:
         """Execute a workbench script located under workbench/scripts/.
 
         Args:
-            relative_path: path relative to `workbench/scripts/`.
+            relative_path: path relative to the project root (must resolve under workbench/scripts/).
 
         Returns:
             (returncode, stdout, stderr)
