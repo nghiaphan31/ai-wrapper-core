@@ -7,9 +7,9 @@ import difflib
 import shutil
 import shlex
 import uuid
-import re
 from datetime import datetime
 from pathlib import Path
+
 from src.config import GLOBAL_CONFIG
 from src.audit import GLOBAL_LEDGER
 from src.console import GLOBAL_CONSOLE
@@ -57,27 +57,20 @@ def _echo_external_editor_input_to_console_and_transcript(content: str) -> None:
     """Echo external editor input into the normal console/log stream.
 
     REQ_AUDIT_031 (External Input Echo): Any input captured via an external editor
-    MUST be explicitly echoed to the console transcript immediately upon capture,
-    so transcript reconstruction does not require guessing what was typed in Nano.
+    MUST be explicitly echoed to the console transcript immediately upon capture.
 
     Output format:
       [USER_INPUT_ECHO]
       > line 1
       > line 2
       [END_INPUT]
-
-    Notes:
-      - Uses GLOBAL_CONSOLE.print so it is guaranteed to land in sessions/<date>/transcript.log.
-      - Preserves empty input as an explicit empty block.
     """
     text = content if content is not None else ""
-    # Normalize line endings for stable transcript rendering
     text = text.replace("\r\n", "\n").replace("\r", "\n")
 
     GLOBAL_CONSOLE.print("[USER_INPUT_ECHO]")
 
     if text == "":
-        # Explicitly record emptiness (still reconstructable)
         GLOBAL_CONSOLE.print(">")
     else:
         for line in text.split("\n"):
@@ -87,17 +80,7 @@ def _echo_external_editor_input_to_console_and_transcript(content: str) -> None:
 
 
 def get_input_from_editor(prompt_text: str) -> str:
-    """Collect multi-line user input by opening nano on a temporary file.
-
-    Flow:
-      1) Create a NamedTemporaryFile
-      2) Open nano so the user can type freely
-      3) Read back the file content
-      4) Echo content into transcript immediately (REQ_AUDIT_031)
-      5) Delete the temp file
-
-    Returns the full text (may be empty if user saved nothing).
-    """
+    """Collect multi-line user input by opening nano on a temporary file."""
     GLOBAL_CONSOLE.print(f"{prompt_text} (opening nano; save + exit to continue)")
 
     tf_path = None
@@ -136,9 +119,6 @@ def show_diff(
     title_new: str = "Incoming Change",
 ) -> bool:
     """Print a colored unified diff between an existing file and new content.
-
-    - Green for added lines (+)
-    - Red for deleted lines (-)
 
     Returns True if there are changes, False otherwise.
     """
@@ -313,26 +293,11 @@ def _cmd_report() -> None:
 
 
 def _normalize_exec_script_arg(raw: str) -> str:
-    """Normalize the user-provided exec script argument.
-
-    UX goal (per user request):
-      - User should be able to type: exec hello_world.py
-      - Albert MUST only accept scripts located in workbench/scripts/.
-
-    Compatibility:
-      - If the user still types exec workbench/scripts/hello_world.py, we accept it
-        by stripping the prefix to match the runner contract.
-      - Also tolerates ./workbench/scripts/... and leading slashes are still rejected
-        by WorkbenchRunner.
-
-    Returns:
-      A path string relative to workbench/scripts/.
-    """
+    """Normalize the user-provided exec script argument."""
     s = (raw or "").strip()
     if not s:
         return s
 
-    # Normalize separators for prefix matching
     s_norm = s.replace("\\", "/")
 
     prefixes = [
@@ -346,29 +311,11 @@ def _normalize_exec_script_arg(raw: str) -> str:
             s_norm = s_norm[len(pref) :]
             break
 
-    # Keep original style (but normalized) to avoid weird backslashes
     return s_norm
 
 
 def _cmd_exec(tokens: list[str]) -> None:
-    """Execute a workbench script via WorkbenchRunner.
-
-    Usage:
-      exec <script.py> [args...]
-
-    IMPORTANT:
-      - The script MUST be located under workbench/scripts/.
-      - You should provide <script.py> as a path relative to workbench/scripts/.
-        Example: exec hello_world.py
-
-    Examples:
-      exec hello_world.py
-      exec audits/scan_repo.py --flag value
-
-    Blocked examples:
-      exec /tmp/x.py
-      exec ../src/main.py
-    """
+    """Execute a workbench script via WorkbenchRunner."""
     if len(tokens) < 2:
         GLOBAL_CONSOLE.error(
             "Usage: exec <script.py> [args...] (script must be located in workbench/scripts/)"
@@ -408,7 +355,10 @@ def _cmd_exec(tokens: list[str]) -> None:
 def _print_help():
     GLOBAL_CONSOLE.print("Available Albert commands:")
     GLOBAL_CONSOLE.print(
-        "  implement [-f file] [--scope {full,code,specs,minimal}] - Execute an implementation task based on instructions"
+        "  prompt [-f file] [--scope {full,code,specs,minimal}] - Send a prompt/task to Albert's AI brain (generates JSON artifacts)"
+    )
+    GLOBAL_CONSOLE.print(
+        "  implement [-f file] [--scope {full,code,specs,minimal}] - Backward-compatible alias for 'prompt'"
     )
     GLOBAL_CONSOLE.print(
         "  exec <script.py> [args...] - Execute a Python script located in workbench/scripts/ (restricted sandbox)"
@@ -420,7 +370,7 @@ def _print_help():
     GLOBAL_CONSOLE.print("  help                 - Show this help message")
     GLOBAL_CONSOLE.print("  exit                 - Quit the CLI")
 
-    GLOBAL_CONSOLE.print("\nOptions for implement:")
+    GLOBAL_CONSOLE.print("\nOptions for prompt/implement:")
     GLOBAL_CONSOLE.print("  -f, --file   Attach a local file (transient context for this request)")
     GLOBAL_CONSOLE.print("  --scope      Context scope to reduce tokens: full (default), code, specs, minimal")
 
@@ -564,6 +514,165 @@ def _get_head_commit_sha(cwd: str) -> str | None:
     return sha or None
 
 
+def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
+    """Run the main AI prompt -> artifacts -> review/apply -> git -> audit flow.
+
+    This is the core workflow previously named 'implement'.
+
+    Traceability requirement (user request):
+      - The AI brain raw response MUST be printed to screen, therefore also captured
+        into sessions/<date>/transcript.log via GLOBAL_CONSOLE.
+
+    NOTE:
+      - The AI response is expected to be JSON (per SYSTEM_PROMPT_ARCHITECT).
+      - Printing the raw JSON response is acceptable because it is not "copy-paste"
+        (REQ_CORE_003/004) and improves traceability.
+    """
+    session_id = datetime.now().strftime("%Y-%m-%d")
+
+    file_paths = _extract_attached_files(tokens[1:])
+    injection_text, _attached, ok = _build_adhoc_file_injection(file_paths)
+    if not ok:
+        GLOBAL_CONSOLE.print("❌ Action cancelled: one or more attached files could not be read.")
+        return
+
+    scope = _extract_scope(tokens[1:])
+
+    try:
+        instruction = get_input_from_editor("Describe the prompt/task for Albert's AI brain")
+
+        if not instruction.strip():
+            GLOBAL_CONSOLE.print("❌ Action cancelled: Empty instruction.")
+            return
+
+        if injection_text:
+            instruction = f"{instruction.rstrip()}\n\n{injection_text.lstrip()}"
+
+        GLOBAL_CONSOLE.print(f"Building project context (Scope: {scope})...")
+        project_context = GLOBAL_CONTEXT.build_full_context(scope=scope)
+
+        full_user_prompt = f"{instruction}\n\n{project_context}"
+
+        GLOBAL_CONSOLE.print("Requesting Architect AI (expecting JSON)...")
+
+        json_response, usage_stats = client.send_chat_request(
+            system_prompt=SYSTEM_PROMPT_ARCHITECT,
+            user_prompt=full_user_prompt,
+        )
+
+        # Traceability: print AI brain response to screen + transcript.
+        # Keep it clearly delimited for grep/audit.
+        GLOBAL_CONSOLE.print("[AI_RESPONSE_BEGIN]")
+        GLOBAL_CONSOLE.print(json_response or "")
+        GLOBAL_CONSOLE.print("[AI_RESPONSE_END]")
+
+        step_id = _generate_step_id()
+        files = GLOBAL_ARTIFACTS.process_response(
+            session_id="current",
+            step_name=step_id,
+            raw_text=json_response,
+        )
+
+    except Exception as e:
+        GLOBAL_CONSOLE.error(f"❌ Tool/AI execution failed: {e}")
+        files = []
+        usage_stats = {}
+        step_id = _generate_step_id()
+        instruction = ""
+
+    if files:
+        artifact_folder = GLOBAL_CONFIG.project_root / "artifacts" / step_id
+        GLOBAL_CONSOLE.print(f"SUCCESS: Generated {len(files)} files in artifacts/{step_id}/")
+
+        commit_message = (instruction or "").strip() or f"Prompt changes ({step_id})"
+        should_apply = review_and_apply(artifact_folder=artifact_folder, commit_message=commit_message)
+
+        if should_apply:
+            artifact_files = [p for p in Path(artifact_folder).rglob("*") if p.is_file()]
+            artifact_files.sort(key=lambda p: str(p))
+
+            for artifact_path in artifact_files:
+                rel = artifact_path.relative_to(artifact_folder)
+                dest_path = (GLOBAL_CONFIG.project_root / rel).resolve()
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(artifact_path, dest_path)
+
+            git_ok = True
+            head_sha: str | None = None
+            try:
+                paths = ["project.json", "src", "specs", "impl-docs", "notes", "workbench"]
+                git_ok = git_add_force_tracked_paths(paths, cwd=str(GLOBAL_CONFIG.project_root))
+
+                if git_ok:
+                    git_ok = git_commit_resilient(commit_message, cwd=str(GLOBAL_CONFIG.project_root))
+
+                if git_ok:
+                    git_ok = git_run_ok(["push"], cwd=str(GLOBAL_CONFIG.project_root))
+
+                if git_ok:
+                    head_sha = _get_head_commit_sha(cwd=str(GLOBAL_CONFIG.project_root))
+
+            except Exception as e:
+                git_ok = False
+                GLOBAL_CONSOLE.error(f"❌ Git Error: unexpected failure: {e}")
+
+            if git_ok:
+                GLOBAL_LEDGER.log_transaction(
+                    session_id=session_id,
+                    user_instruction=(instruction or "").strip(),
+                    step_id=step_id,
+                    usage_stats=usage_stats,
+                    status="success",
+                )
+
+                pt = int((usage_stats or {}).get("prompt_tokens", 0) or 0)
+                ct = int((usage_stats or {}).get("completion_tokens", 0) or 0)
+                tt = int((usage_stats or {}).get("total_tokens", 0) or 0)
+                in_cost, out_cost, total_cost = _estimate_cost_usd(usage_stats)
+
+                if head_sha:
+                    GLOBAL_CONSOLE.print(f"✅ Success: Changes applied and pushed. (commit: {head_sha})")
+                else:
+                    GLOBAL_CONSOLE.print("✅ Success: Changes applied and pushed.")
+
+                GLOBAL_CONSOLE.print(f"Token Usage: prompt={pt}, completion={ct}, total={tt}")
+                GLOBAL_CONSOLE.print(
+                    f"Estimated Cost: input=${in_cost:.6f}, output=${out_cost:.6f}, total=${total_cost:.6f}"
+                )
+            else:
+                GLOBAL_CONSOLE.error(
+                    "Git workflow did not complete successfully. Your changes may be applied locally but not committed/pushed."
+                )
+
+        else:
+            GLOBAL_CONSOLE.print("Changes were not applied.")
+
+        try:
+            rel_artifacts = []
+            for abs_path in files:
+                try:
+                    p = Path(abs_path)
+                    rel = p.relative_to(artifact_folder)
+                    rel_artifacts.append(str(rel))
+                except Exception:
+                    rel_artifacts.append(str(abs_path))
+            _trinity_protocol_consistency_check(rel_artifacts)
+        except Exception:
+            pass
+
+    else:
+        GLOBAL_CONSOLE.error("No files generated.")
+
+    try:
+        manifest_rel = GLOBAL_ARTIFACTS.generate_session_manifest(session_id=session_id)
+        if manifest_rel:
+            GLOBAL_CONSOLE.print(f"📜  Session Manifest saved: {manifest_rel}")
+        else:
+            GLOBAL_CONSOLE.error("Manifest was not saved (see earlier errors).")
+    except Exception as e:
+        GLOBAL_CONSOLE.error(f"Manifest generation failed: {e}")
+
+
 def main():
     GLOBAL_CONSOLE.print("--- ALBERT (Your Personal AI Steward) ---")
 
@@ -583,7 +692,7 @@ def main():
     try:
         while True:
             user_input = GLOBAL_CONSOLE.input(
-                f"[{GLOBAL_CONFIG.project_root}]\nCommand (implement, exec, test_ai, status, report, help, clear, exit): "
+                f"[{GLOBAL_CONFIG.project_root}]\nCommand (prompt, implement, exec, test_ai, status, report, help, clear, exit): "
             )
 
             try:
@@ -629,150 +738,19 @@ def main():
                 GLOBAL_CONSOLE.print(f"\n🤖 AI Response:\n{response_text}\n")
                 continue
 
+            # New canonical command
+            if cmd == "prompt":
+                if not client:
+                    client = AIClient()
+                _run_prompt_flow(tokens=tokens, client=client)
+                continue
+
+            # Backward-compatible alias
             if cmd == "implement":
                 if not client:
                     client = AIClient()
-
-                session_id = datetime.now().strftime("%Y-%m-%d")
-
-                file_paths = _extract_attached_files(tokens[1:])
-                injection_text, _attached, ok = _build_adhoc_file_injection(file_paths)
-                if not ok:
-                    GLOBAL_CONSOLE.print("❌ Action cancelled: one or more attached files could not be read.")
-                    continue
-
-                scope = _extract_scope(tokens[1:])
-
-                try:
-                    instruction = get_input_from_editor("Describe the implementation task")
-
-                    if not instruction.strip():
-                        GLOBAL_CONSOLE.print("❌ Action cancelled: Empty instruction.")
-                        continue
-
-                    if injection_text:
-                        instruction = f"{instruction.rstrip()}\n\n{injection_text.lstrip()}"
-
-                    GLOBAL_CONSOLE.print(f"Building project context (Scope: {scope})...")
-                    project_context = GLOBAL_CONTEXT.build_full_context(scope=scope)
-
-                    full_user_prompt = f"{instruction}\n\n{project_context}"
-
-                    GLOBAL_CONSOLE.print("Requesting Architect AI (expecting JSON)...")
-
-                    json_response, usage_stats = client.send_chat_request(
-                        system_prompt=SYSTEM_PROMPT_ARCHITECT,
-                        user_prompt=full_user_prompt,
-                    )
-
-                    step_id = _generate_step_id()
-                    files = GLOBAL_ARTIFACTS.process_response(
-                        session_id="current",
-                        step_name=step_id,
-                        raw_text=json_response,
-                    )
-
-                except Exception as e:
-                    GLOBAL_CONSOLE.error(f"❌ Tool/AI execution failed: {e}")
-                    files = []
-                    usage_stats = {}
-                    step_id = _generate_step_id()
-                    instruction = ""
-
-                if files:
-                    artifact_folder = GLOBAL_CONFIG.project_root / "artifacts" / step_id
-                    GLOBAL_CONSOLE.print(f"SUCCESS: Generated {len(files)} files in artifacts/{step_id}/")
-
-                    commit_message = (instruction or "").strip() or f"Implement changes ({step_id})"
-                    should_apply = review_and_apply(artifact_folder=artifact_folder, commit_message=commit_message)
-
-                    if should_apply:
-                        artifact_files = [p for p in Path(artifact_folder).rglob("*") if p.is_file()]
-                        artifact_files.sort(key=lambda p: str(p))
-
-                        for artifact_path in artifact_files:
-                            rel = artifact_path.relative_to(artifact_folder)
-                            dest_path = (GLOBAL_CONFIG.project_root / rel).resolve()
-                            dest_path.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.copyfile(artifact_path, dest_path)
-
-                        git_ok = True
-                        head_sha: str | None = None
-                        try:
-                            # Ensure workbench is included in the tracked paths whitelist.
-                            paths = ["project.json", "src", "specs", "impl-docs", "notes", "workbench"]
-                            git_ok = git_add_force_tracked_paths(paths, cwd=str(GLOBAL_CONFIG.project_root))
-
-                            if git_ok:
-                                git_ok = git_commit_resilient(commit_message, cwd=str(GLOBAL_CONFIG.project_root))
-
-                            if git_ok:
-                                git_ok = git_run_ok(["push"], cwd=str(GLOBAL_CONFIG.project_root))
-
-                            # After successful push, capture HEAD SHA for user visibility.
-                            if git_ok:
-                                head_sha = _get_head_commit_sha(cwd=str(GLOBAL_CONFIG.project_root))
-
-                        except Exception as e:
-                            git_ok = False
-                            GLOBAL_CONSOLE.error(f"❌ Git Error: unexpected failure: {e}")
-
-                        if git_ok:
-                            GLOBAL_LEDGER.log_transaction(
-                                session_id=session_id,
-                                user_instruction=(instruction or "").strip(),
-                                step_id=step_id,
-                                usage_stats=usage_stats,
-                                status="success",
-                            )
-
-                            pt = int((usage_stats or {}).get("prompt_tokens", 0) or 0)
-                            ct = int((usage_stats or {}).get("completion_tokens", 0) or 0)
-                            tt = int((usage_stats or {}).get("total_tokens", 0) or 0)
-                            in_cost, out_cost, total_cost = _estimate_cost_usd(usage_stats)
-
-                            if head_sha:
-                                GLOBAL_CONSOLE.print(f"✅ Success: Changes applied and pushed. (commit: {head_sha})")
-                            else:
-                                GLOBAL_CONSOLE.print("✅ Success: Changes applied and pushed.")
-
-                            GLOBAL_CONSOLE.print(f"Token Usage: prompt={pt}, completion={ct}, total={tt}")
-                            GLOBAL_CONSOLE.print(
-                                f"Estimated Cost: input=${in_cost:.6f}, output=${out_cost:.6f}, total=${total_cost:.6f}"
-                            )
-                        else:
-                            GLOBAL_CONSOLE.error(
-                                "Git workflow did not complete successfully. Your changes may be applied locally but not committed/pushed."
-                            )
-
-                    else:
-                        GLOBAL_CONSOLE.print("Changes were not applied.")
-
-                    try:
-                        rel_artifacts = []
-                        for abs_path in files:
-                            try:
-                                p = Path(abs_path)
-                                rel = p.relative_to(artifact_folder)
-                                rel_artifacts.append(str(rel))
-                            except Exception:
-                                rel_artifacts.append(str(abs_path))
-                        _trinity_protocol_consistency_check(rel_artifacts)
-                    except Exception:
-                        pass
-
-                else:
-                    GLOBAL_CONSOLE.error("No files generated.")
-
-                try:
-                    manifest_rel = GLOBAL_ARTIFACTS.generate_session_manifest(session_id=session_id)
-                    if manifest_rel:
-                        GLOBAL_CONSOLE.print(f"📜  Session Manifest saved: {manifest_rel}")
-                    else:
-                        GLOBAL_CONSOLE.error("Manifest was not saved (see earlier errors).")
-                except Exception as e:
-                    GLOBAL_CONSOLE.error(f"Manifest generation failed: {e}")
-
+                GLOBAL_CONSOLE.print("ℹ️  'implement' is deprecated; use 'prompt' instead.")
+                _run_prompt_flow(tokens=tokens, client=client)
                 continue
 
             GLOBAL_CONSOLE.error("Unknown command. Type 'help' to see available commands.")
