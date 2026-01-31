@@ -699,6 +699,26 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
                     )
                     continue
 
+                # --- HOT-FIX: Auto-deploy logic ---
+                # Check if the target script is in the artifacts generated in THIS turn.
+                found_artifact_path = None
+                # 'files' contains absolute paths. We check if they end with the target path.
+                # target_script is e.g. "workbench/scripts/count.py"
+                for generated_file in (files or []):
+                    if str(generated_file).endswith(target_script):
+                        found_artifact_path = Path(generated_file)
+                        break
+                
+                if found_artifact_path:
+                    dest_path = GLOBAL_CONFIG.project_root / target_script
+                    try:
+                        dest_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy(found_artifact_path, dest_path)
+                        GLOBAL_CONSOLE.print(f"⚡ Auto-deployed script to: {dest_path}")
+                    except Exception as e:
+                        GLOBAL_CONSOLE.error(f"Failed to auto-deploy script: {e}")
+                # ----------------------------------
+
                 # Execute script (sandboxed)
                 GLOBAL_CONSOLE.print("--- REBOUND EXECUTION (autonomous) ---")
                 GLOBAL_CONSOLE.print(f"Next Action Type: {na_type}")
