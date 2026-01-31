@@ -10,6 +10,7 @@
 !src/**
 !specs/**
 !impl-docs/**
+!workbench/scripts/**
 !notes/**
 !project.json
 !.gitignore
