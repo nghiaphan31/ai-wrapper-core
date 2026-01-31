@@ -1,5 +1,5 @@
 # Project Albert — Documentation d'Implémentation : Core System
-**Version :** 0.1.2 (Itération 1)
+**Version :** 0.1.3
 **Date :** 2026-01-31
 
 ## 1. Vue d'ensemble
@@ -27,23 +27,20 @@ Le dépôt inclut un dossier **`workbench/`** destiné aux outils d’intendance
 * scripts d’audit/maintenance (workbench),
 * scripts temporaires générés pour exécution Artifact-First (`artifacts/.../tool_script.py`).
 
-Exemple :
-* `workbench/scripts/structural_audit.py` : script exécutable manuellement pour imprimer l’arborescence et lister les dossiers vides.
-
 ### 1.2 Audit Ledger System (Traceabilité + Coûts)
 En plus du ledger événementiel (machine-level), Albert maintient désormais un **Audit Ledger** orienté "transactions" pour assurer une traçabilité directe des opérations et des coûts.
 
-* **Fichier :** `audit_log.jsonl` à la racine du projet (append-only)
+* **Fichier :** `ledger/audit_log.jsonl` (append-only)
 * **Objectif :** lier explicitement une action utilisateur (`prompt`) à un `step_id`, un `session_id`, des **token usage stats**, et un **status** (ex: `success`).
 * **Affichage console :** après un `prompt` réussi (commit + push), Albert affiche les tokens (prompt/completion/total) et une estimation de coût.
 
-> Le ledger événementiel (`ledger/events.jsonl`) reste la source de vérité pour les événements fins (api_response, file_write, etc.). L'audit ledger (`audit_log.jsonl`) est un résumé transactionnel orienté comptabilité.
+> Le ledger événementiel (`ledger/events.jsonl`) reste la source de vérité pour les événements fins (api_response, file_write, etc.). L'audit ledger (`ledger/audit_log.jsonl`) est un résumé transactionnel orienté comptabilité.
 
 ### 1.3 Financial & Operational Reporting (Visibility Gap Closure)
 Albert inclut désormais une capacité de **reporting agrégé** pour combler le manque de visibilité sur les tokens et les coûts.
 
 * **Commande CLI :** `report`
-* **Source de données :** `audit_log.jsonl`
+* **Source de données :** `ledger/audit_log.jsonl`
 * **Sortie console :** un tableau de bord concis (transactions, tokens in/out, coût estimé, chemin du ledger)
 * **Tolérance :** si le ledger est absent ou vide, le rapport affiche des zéros (pas de crash).
 
@@ -51,16 +48,8 @@ Albert inclut désormais une capacité de **reporting agrégé** pour combler le
 Albert applique une gouvernance stricte d’alignement entre trois couches :
 
 1) **Specs (Requirements)** — `specs/`
-   * source des exigences (Req_ID)
-   * définit le *quoi/pourquoi* (baseline)
-
 2) **Code (Implementation)** — `src/`
-   * implémente le *comment*
-   * chaque fonctionnalité significative doit pouvoir être reliée à un ou plusieurs Req_ID
-
 3) **Impl-Docs (Living Documentation)** — `impl-docs/`
-   * décrit l’état réel du code (ce qui est effectivement codé)
-   * sert de “carte” opérationnelle : modules, flux, formats de logs, localisation des artefacts
 
 #### 1.4.1 Matrice de Traçabilité = Source de Vérité
 Le fichier **`traceability_matrix.md`** (à la racine du projet) est la **Source of Truth** qui relie explicitement :
@@ -69,78 +58,66 @@ Le fichier **`traceability_matrix.md`** (à la racine du projet) est la **Source
 - la **documentation `impl-docs/`** correspondante,
 - et un **statut** (Implemented / Partial / Planned).
 
-#### 1.4.2 Règle de maintenance (cycle de vie)
-À chaque changement significatif :
-- si du code est modifié/ajouté dans `src/`, la doc correspondante **doit** être mise à jour dans `impl-docs/` (Definition of Done),
-- et la **ligne correspondante** dans `traceability_matrix.md` **doit** être mise à jour (statut + liens).
-
-#### 1.4.3 Gestion des écarts
-- Si une fonctionnalité est implémentée mais **sans Req_ID**, il faut **mettre à jour les Specs d’abord** (ajout au registre d’exigences) avant de considérer la feature « conforme ». Cela maintient l’alignement *Specs ↔ Code ↔ Impl-Docs*.
-
 ### 1.5 Governance: The Trinity Protocol (REQ_CORE_060)
-Albert institutionnalise une gouvernance stricte appelée **The Trinity Protocol** : l’alignement permanent entre **Specs**, **Code**, et **Docs**.
-
-#### 1.5.1 Principe
-Toute modification d’une couche (**Specs**, **Code**, ou **Docs**) DOIT déclencher une évaluation des deux autres.
-
-* **Code Change (`src/`)** → nécessite une mise à jour correspondante dans `impl-docs/` et peut nécessiter un retrofit dans `specs/`.
-* **Spec Change (`specs/`)** → nécessite une implémentation dans `src/` et une mise à jour dans `impl-docs/`.
-* **Doc Change (`impl-docs/`)** → DOIT refléter le comportement réel du code et les exigences des specs.
-
-#### 1.5.2 Mécanisme 1 : Enforcement via System Prompt
-Le système renforce ce protocole au niveau du modèle via le **System Prompt**.
-
-* **Où :** `src/ai_client.py`
-* **Mécanisme :** le client construit le prompt système final en **appendant** un bloc obligatoire :
-  * “TRINITY PROTOCOL ENABLED …”
-  * règles : ne jamais produire du code sans évaluer `impl-docs/`, ne jamais implémenter une feature sans évaluer `specs/`, et obligation d’évaluer les trois couches.
-
-Objectif : rendre l’IA *steward* de l’écosystème, pas seulement générateur de fichiers.
-
-#### 1.5.3 Mécanisme 2 : Runtime Warnings (best-effort)
-En complément, Albert effectue un contrôle **best-effort** au runtime dans le flux `prompt`.
-
-* **Où :** `src/main.py` (commande `prompt`)
-* **Logique :** après génération des artefacts, Albert scanne les chemins de fichiers générés.
-  * si des changements `src/` sont détectés **sans** présence de `impl-docs/` et/ou `specs/` dans la même session, Albert affiche un bloc d’avertissement.
-
-Ce mécanisme ne bloque pas l’exécution (pas de hard stop), car certaines sessions peuvent volontairement produire du code « en avance » avant retrofit. L’objectif est d’éviter les dérives silencieuses.
+(Section inchangée; voir versions précédentes.)
 
 ### 1.6 Safe System Inspection (SSI) — REQ_CORE_050
-Albert inclut un mécanisme de **Safe System Inspection (SSI)** permettant au système (et donc à l’IA via le wrapper) d’effectuer des **observations empiriques** de l’environnement local (Ground Truth) sans mettre en danger la stabilité du système.
-
-**But :** autoriser des commandes **read-only** (inspection) afin de vérifier la réalité (structure de projet, état git, lecture de fichiers) avant de faire des hypothèses.
-
-#### 1.6.1 Module
-* **Code :** `src/system_tools.py`
-* **Classe :** `SafeCommandRunner`
-* **Méthode :** `run_safe_command(command_str)`
-
-#### 1.6.2 Allowlist (commandes autorisées)
-Allowlist stricte (préfixes exacts) :
-* `tree`
-* `ls`
-* `dir`
-* `git status`
-* `git log`
-* `git diff`
-* `find`
-* `grep`
-* `cat`
-
-> Les entrées multi-mots (ex: `git status`) doivent matcher le **préfixe exact** des tokens (`["git","status", ...]`).
-
-#### 1.6.3 Contraintes de sécurité
-SSI applique des garde-fous conservateurs :
-* **Interdiction des opérateurs de chaînage / redirection :** rejet si la commande contient `&&`, `;`, `|`, `>`.
-* **Pas de `shell=True` :** exécution via `subprocess.run(tokens, capture_output=True, text=True)`.
-* **Parsing robuste :** split via `shlex.split`.
-* **Blocage implicite des commandes destructrices :** `rm`, `mv`, `chmod`, etc. ne sont pas allowlistées, donc refusées.
+(Section inchangée; voir versions précédentes.)
 
 ### 1.7 Version Control — Git Tolerance / Soft Fail (REQ_CORE_080)
-Albert applique une politique de **tolérance Git** pour éviter que le workflow ne casse sur un cas courant : `git commit` sans changements.
+(Section inchangée; voir versions précédentes.)
 
-(Section inchangée; voir `impl-docs/01_core_system.md` version précédente.)
+### 1.8 Autonomous Rebound Protocol (Agent Loop) — REQ_AUTO_010..REQ_AUTO_050
+Albert supporte désormais un mode **agent autonome** ("Rebound") permettant au modèle d’enchaîner :
+
+`User → AI → artifacts + next_action → Wrapper executes script → Wrapper feeds output → AI → ... → final response`
+
+#### 1.8.1 Où c’est implémenté
+* **Code :** `src/main.py` (fonction `_run_prompt_flow`)
+* **Parsing :** `src/artifact_manager.py` via `process_response(..., enable_rebound=True)` qui retourne `(files, next_action)`
+* **Exécution sandboxée :** `src/workbench_runner.py` (`WorkbenchRunner`) — strictement limité à `workbench/scripts/`.
+
+#### 1.8.2 next_action (v1)
+Le modèle peut inclure un objet JSON `next_action` dans la réponse structurée.
+
+Schéma v1 :
+```json
+{
+  "type": "exec_and_chain",
+  "target_script": "workbench/scripts/...",
+  "continuation_prompt": "..."
+}
+```
+
+Règles de sécurité (v1) :
+* `type` doit être exactement `exec_and_chain`.
+* `target_script` doit être **relatif racine projet** et pointer **strictement** sous `workbench/scripts/`.
+* Pas d’exécution shell. Uniquement un script Python via `WorkbenchRunner`.
+* Timeout obligatoire (runner).
+
+#### 1.8.3 Boucle Rebound (state machine)
+La commande `prompt` exécute maintenant une boucle bornée :
+* **MAX_LOOPS = 5** (garde-fou)
+* à chaque tour :
+  1) appel IA,
+  2) écriture artefacts dans `artifacts/<step_id>/...`,
+  3) si `next_action` présent : exécution du script demandé (sandbox), capture `stdout/stderr/returncode`,
+  4) construction d’un nouveau prompt utilisateur :
+     - bloc `System Output` (stdout/stderr/returncode)
+     - + `continuation_prompt` fourni par l’IA
+  5) nouvel appel IA.
+
+La boucle s’arrête quand `next_action` est absent (réponse finale).
+
+#### 1.8.4 Traceabilité (console + ledger)
+* Chaque réponse IA est affichée entre délimiteurs :
+  * `[AI_RESPONSE_BEGIN]` ... `[AI_RESPONSE_END]`
+  (donc capturée dans `sessions/<date>/transcript.log`).
+* Chaque exécution Rebound imprime `STDOUT/STDERR/returncode` en console/transcript.
+* Les exécutions intermédiaires sont journalisées dans `ledger/events.jsonl` (action_type: `rebound_exec`, ou `rebound_exec_blocked` en cas de blocage sécurité).
+
+#### 1.8.5 Git (pas de commit prématuré)
+Le workflow Git (review/apply → commit → push) reste **uniquement** à la fin, après la réponse finale (quand `next_action` est absent). Les tours intermédiaires Rebound ne déclenchent aucun commit/push.
 
 ## 2. Modules Principaux (`src/`)
 
@@ -165,11 +142,12 @@ Commandes disponibles dans la CLI interactive :
 * `prompt` : envoie un prompt/tâche au “cerveau IA” d’Albert et écrit les fichiers dans `artifacts/<step_id>/`.
   * Supporte **Ad-hoc File Injection** via `-f/--file` : `prompt [-f file]`.
   * Supporte `--scope {full,code,specs,minimal}`.
-  * **Traceabilité renforcée :** la réponse brute de l’IA est affichée à l’écran et donc capturée dans `sessions/.../transcript.log`.
+  * **Rebound Protocol :** si l’IA renvoie `next_action`, Albert exécute automatiquement le script demandé (sandbox) et relance l’IA jusqu’à obtention d’une réponse finale.
+  * **Traceabilité renforcée :** chaque réponse brute de l’IA est affichée à l’écran.
 * `implement` : alias rétro-compatible de `prompt` (déprécié; affiche un message invitant à utiliser `prompt`).
 * `test_ai` : envoie une requête minimale à l’IA (sanity check de connectivité).
 * `status` : affiche un état Git rapide du dépôt.
-* `report` : affiche un rapport agrégé basé sur `audit_log.jsonl`.
+* `report` : affiche un rapport agrégé basé sur `ledger/audit_log.jsonl`.
 * `help` : affiche l’aide.
 * `clear` : efface l’écran via `clear`.
 

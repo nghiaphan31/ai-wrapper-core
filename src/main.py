@@ -37,16 +37,39 @@ TOOLS / GROUND TRUTH INSPECTION (REQ_CORE_050):
 You have access to a `run_safe_command` tool to inspect the file system (ls, tree) and git status.
 Use this to verify reality before making assumptions.
 
+AUTONOMOUS REBOUND PROTOCOL (specs/10_autonomous_rebound_protocol.md):
+- You MAY request the wrapper to execute a workbench script (read-only inspection / audit / analysis) and then chain another AI call.
+- To do so, include a top-level JSON field `next_action` in your response (separate from `artifacts`).
+- This is the ONLY autonomous action supported in v1.
+
+JSON Schema (v1) for `next_action`:
+{
+  "type": "exec_and_chain",
+  "target_script": "workbench/scripts/<path>.py",
+  "continuation_prompt": "Explain what to do next after seeing the system output"
+}
+
+Rules:
+- `type` MUST be exactly: "exec_and_chain".
+- `target_script` MUST be a project-root relative path and MUST start with: "workbench/scripts/".
+- No shell commands. Only Python scripts under workbench/scripts/.
+- The wrapper will execute the script, capture STDOUT/STDERR/returncode, and feed it back to you.
+
 RESPONSE FORMAT:
 {
   "thought_process": "Brief explanation...",
   "artifacts": [
     {
       "path": "src/filename.py",
-      "operation": "create", 
+      "operation": "create",
       "content": "FULL_PYTHON_CODE"
     }
-  ]
+  ],
+  "next_action": {
+    "type": "exec_and_chain",
+    "target_script": "workbench/scripts/...",
+    "continuation_prompt": "..."
+  }
 }
 
 NOTE: If updating an existing file found in context, provide the FULL new content of the file, not just a diff.
@@ -178,11 +201,11 @@ def review_and_apply(artifact_folder: str | Path, commit_message: str) -> bool:
     project_root = GLOBAL_CONFIG.project_root
 
     all_files = [p for p in artifact_folder.rglob("*") if p.is_file()]
-    
+
     # On exclut les fichiers .meta.json et les traces brutes
     artifact_files = [
-        p for p in all_files 
-        if not p.name.endswith(".meta.json") 
+        p for p in all_files
+        if not p.name.endswith(".meta.json")
         and p.name != "raw_response_trace.jsonl"
     ]
     artifact_files.sort(key=lambda p: str(p))
@@ -521,19 +544,54 @@ def _get_head_commit_sha(cwd: str) -> str | None:
     return sha or None
 
 
+def _validate_next_action_target(target_script: str) -> tuple[bool, str, str]:
+    """Validate next_action target_script.
+
+    Returns:
+      (ok, normalized_rel_to_workbench, error_message)
+
+    Security constraints (REQ_AUTO_040):
+      - must be project-root relative and strictly under workbench/scripts/
+      - must not be absolute and must not contain path traversal
+
+    Note:
+      WorkbenchRunner expects a path relative to workbench/scripts/.
+    """
+    t = (target_script or "").strip().replace("\\", "/")
+    if not t:
+        return False, "", "next_action.target_script is empty"
+
+    if t.startswith("/"):
+        return False, "", "next_action.target_script must be project-root relative (absolute path forbidden)"
+
+    if not t.startswith("workbench/scripts/"):
+        return False, "", "next_action.target_script must start with 'workbench/scripts/'"
+
+    rel = t[len("workbench/scripts/") :]
+    if not rel:
+        return False, "", "next_action.target_script missing script name after workbench/scripts/"
+
+    # Basic traversal hard-stop (WorkbenchRunner also validates after resolve)
+    if ".." in Path(rel).parts:
+        return False, "", "next_action.target_script contains path traversal ('..')"
+
+    return True, rel, ""
+
+
 def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
-    """Run the main AI prompt -> artifacts -> review/apply -> git -> audit flow.
+    """Run the main AI prompt -> artifacts -> (optional rebound loop) -> review/apply -> git -> audit flow.
 
-    This is the core workflow previously named 'implement'.
+    Implements specs/10_autonomous_rebound_protocol.md (REQ_AUTO_010..050).
 
-    Traceability requirement (user request):
-      - The AI brain raw response MUST be printed to screen, therefore also captured
-        into sessions/<date>/transcript.log via GLOBAL_CONSOLE.
+    Traceability:
+      - Every AI response is printed to console/transcript.
+      - Every rebound exec output is printed to console/transcript.
+      - Intermediate exec steps are logged to GLOBAL_LEDGER.
 
-    NOTE:
-      - The AI response is expected to be JSON (per SYSTEM_PROMPT_ARCHITECT).
-      - Printing the raw JSON response is acceptable because it is not "copy-paste"
-        (REQ_CORE_003/004) and improves traceability.
+    Safety:
+      - Rebound loop is bounded by MAX_LOOPS.
+      - Execution is restricted to workbench/scripts/ via WorkbenchRunner.
+      - No git commit/push until the final response (i.e., when next_action is None).
     """
     session_id = datetime.now().strftime("%Y-%m-%d")
 
@@ -544,6 +602,17 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
         return
 
     scope = _extract_scope(tokens[1:])
+
+    instruction = ""
+    usage_stats: dict = {}
+
+    # Rebound loop state
+    MAX_LOOPS = 5
+    loop_idx = 0
+
+    # Track ALL artifacts generated across rebound turns (for Trinity warnings + final review)
+    all_generated_files: list[str] = []
+    final_step_id: str | None = None
 
     try:
         instruction = get_input_from_editor("Describe the prompt/task for Albert's AI brain")
@@ -558,40 +627,131 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
         GLOBAL_CONSOLE.print(f"Building project context (Scope: {scope})...")
         project_context = GLOBAL_CONTEXT.build_full_context(scope=scope)
 
-        full_user_prompt = f"{instruction}\n\n{project_context}"
+        # Initial user prompt (turn 0)
+        current_user_prompt = f"{instruction}\n\n{project_context}"
 
-        GLOBAL_CONSOLE.print("Requesting Architect AI (expecting JSON)...")
+        runner = WorkbenchRunner(project_root=GLOBAL_CONFIG.project_root, timeout_s=60)
 
-        json_response, usage_stats = client.send_chat_request(
-            system_prompt=SYSTEM_PROMPT_ARCHITECT,
-            user_prompt=full_user_prompt,
-        )
+        while True:
+            loop_idx += 1
+            if loop_idx > MAX_LOOPS:
+                GLOBAL_CONSOLE.error(f"⛔ Rebound safety break: exceeded MAX_LOOPS={MAX_LOOPS}")
+                break
 
-        # Traceability: print AI brain response to screen + transcript.
-        # Keep it clearly delimited for grep/audit.
-        GLOBAL_CONSOLE.print("[AI_RESPONSE_BEGIN]")
-        GLOBAL_CONSOLE.print(json_response or "")
-        GLOBAL_CONSOLE.print("[AI_RESPONSE_END]")
+            GLOBAL_CONSOLE.print(f"Requesting Architect AI (expecting JSON)... [turn {loop_idx}/{MAX_LOOPS}]")
 
-        step_id = _generate_step_id()
-        files = GLOBAL_ARTIFACTS.process_response(
-            session_id="current",
-            step_name=step_id,
-            raw_text=json_response,
-        )
+            json_response, usage_stats = client.send_chat_request(
+                system_prompt=SYSTEM_PROMPT_ARCHITECT,
+                user_prompt=current_user_prompt,
+            )
+
+            # Traceability: print AI brain response to screen + transcript.
+            GLOBAL_CONSOLE.print("[AI_RESPONSE_BEGIN]")
+            GLOBAL_CONSOLE.print(json_response or "")
+            GLOBAL_CONSOLE.print("[AI_RESPONSE_END]")
+
+            step_id = _generate_step_id()
+            final_step_id = step_id
+
+            files, next_action = GLOBAL_ARTIFACTS.process_response(
+                session_id="current",
+                step_name=step_id,
+                raw_text=json_response,
+                enable_rebound=True,
+            )
+            all_generated_files.extend(list(files or []))
+
+            if files:
+                GLOBAL_CONSOLE.print(f"SUCCESS: Generated {len(files)} files in artifacts/{step_id}/")
+            else:
+                GLOBAL_CONSOLE.print(f"No artifact files generated in artifacts/{step_id}/")
+
+            # REQ_AUTO_030: if next_action present, execute and chain
+            if next_action:
+                na_type = (next_action.get("type") or "").strip()
+                target_script = (next_action.get("target_script") or "").strip()
+                continuation_prompt = (next_action.get("continuation_prompt") or "").strip()
+
+                if na_type != "exec_and_chain":
+                    GLOBAL_CONSOLE.error(f"⚠️ Invalid next_action.type: {na_type}")
+                    # Treat as terminal (do not loop) to avoid arbitrary behaviors
+                    break
+
+                ok_target, rel_to_workbench, err_msg = _validate_next_action_target(target_script)
+                if not ok_target:
+                    GLOBAL_CONSOLE.error(f"⛔ Security: blocked next_action target_script. Reason: {err_msg}")
+                    # Feed diagnostic back to AI for correction
+                    system_output_block = (
+                        "System Output:\n"
+                        f"[STDOUT]\n\n"
+                        f"[STDERR]\n{err_msg}\n\n"
+                        f"[RETURN_CODE]\n1\n"
+                    )
+                    current_user_prompt = f"{system_output_block}\n\n{continuation_prompt}".strip()
+
+                    GLOBAL_LEDGER.log_event(
+                        actor="wrapper",
+                        action_type="rebound_exec_blocked",
+                        payload_ref=None,
+                        artifacts=[
+                            f"artifacts/{step_id}/raw_response_trace.jsonl",
+                        ],
+                    )
+                    continue
+
+                # Execute script (sandboxed)
+                GLOBAL_CONSOLE.print("--- REBOUND EXECUTION (autonomous) ---")
+                GLOBAL_CONSOLE.print(f"Next Action Type: {na_type}")
+                GLOBAL_CONSOLE.print(f"Target Script: {target_script}")
+
+                rc, out, err = runner.run_script(rel_to_workbench, script_args=[])
+
+                # Print intermediate outputs to console/transcript
+                GLOBAL_CONSOLE.print(f"Return code: {rc}")
+                GLOBAL_CONSOLE.print("[STDOUT]")
+                GLOBAL_CONSOLE.print((out or "").rstrip("\n") if (out or "").strip() else "(empty)")
+                GLOBAL_CONSOLE.print("[STDERR]")
+                GLOBAL_CONSOLE.print((err or "").rstrip("\n") if (err or "").strip() else "(empty)")
+
+                # Ledger log intermediate step
+                GLOBAL_LEDGER.log_event(
+                    actor="wrapper",
+                    action_type="rebound_exec",
+                    payload_ref=None,
+                    artifacts=[
+                        f"workbench/scripts/{rel_to_workbench}",
+                        f"artifacts/{step_id}/raw_response_trace.jsonl",
+                    ],
+                )
+
+                # Construct chaining prompt
+                system_output_block = (
+                    "System Output:\n"
+                    f"[STDOUT]\n{out or ''}\n\n"
+                    f"[STDERR]\n{err or ''}\n\n"
+                    f"[RETURN_CODE]\n{rc}\n"
+                )
+
+                # Requirement text: "System Output:\n[STDOUT]...\n\n[Continuation Prompt]..."
+                current_user_prompt = f"{system_output_block}\n\n{continuation_prompt}".strip()
+
+                # Loop again
+                continue
+
+            # No next_action: final response reached
+            break
 
     except Exception as e:
         GLOBAL_CONSOLE.error(f"❌ Tool/AI execution failed: {e}")
-        files = []
+        all_generated_files = []
         usage_stats = {}
-        step_id = _generate_step_id()
-        instruction = ""
+        final_step_id = final_step_id or _generate_step_id()
 
-    if files:
-        artifact_folder = GLOBAL_CONFIG.project_root / "artifacts" / step_id
-        GLOBAL_CONSOLE.print(f"SUCCESS: Generated {len(files)} files in artifacts/{step_id}/")
+    # Final step: review/apply only if we have a final step folder and any generated files
+    if final_step_id and all_generated_files:
+        artifact_folder = GLOBAL_CONFIG.project_root / "artifacts" / final_step_id
 
-        commit_message = (instruction or "").strip() or f"Prompt changes ({step_id})"
+        commit_message = (instruction or "").strip() or f"Prompt changes ({final_step_id})"
         should_apply = review_and_apply(artifact_folder=artifact_folder, commit_message=commit_message)
 
         if should_apply:
@@ -627,7 +787,7 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
                 GLOBAL_LEDGER.log_transaction(
                     session_id=session_id,
                     user_instruction=(instruction or "").strip(),
-                    step_id=step_id,
+                    step_id=final_step_id,
                     usage_stats=usage_stats,
                     status="success",
                 )
@@ -654,9 +814,10 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
         else:
             GLOBAL_CONSOLE.print("Changes were not applied.")
 
+        # Trinity warning check (best-effort)
         try:
             rel_artifacts = []
-            for abs_path in files:
+            for abs_path in all_generated_files:
                 try:
                     p = Path(abs_path)
                     rel = p.relative_to(artifact_folder)
