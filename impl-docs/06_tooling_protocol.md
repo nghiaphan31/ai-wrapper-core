@@ -1,88 +1,73 @@
-# Documentation Implémentation : Tooling Protocol (Artifact-First)
-**Version :** 0.1.0
-**Date :** 2026-01-30
+# Documentation Implémentation : Tooling Protocol (Workbench Scripts + Exec)
+**Version :** 0.2.0
+**Date :** 2026-01-31
 
 ## 1. Objectif
-Ce document décrit le protocole d’exécution d’outils locaux en mode **Glass Box** (transparence totale), conformément à **REQ_AUDIT_060 (Transparent Tool Chain / Artifact-First Tool Execution)**.
+Ce document décrit le protocole d’exécution d’outils locaux en mode **Glass Box** (transparence totale), conformément à :
+- **REQ_AUDIT_060** (Transparent Tool Chain / Artifact-First Tool Execution)
+- **REQ_CORE_055** (Workbench Execution Sandbox)
+- **REQ_CORE_090** (Unified Generation Protocol — JSON, pas XML)
+- **REQ_CORE_095** (Explicit Execution Request)
 
 Le principe : **aucune exécution locale “outil” ne doit être opaque**. Toute logique exécutée doit être vérifiable a posteriori via des artefacts persistants.
 
-## 2. Déclenchement : balises `<tool_code>`
-Quand le modèle a besoin d’inspecter l’environnement (audit, ground truth), il ne doit pas répondre directement. Il doit produire un script Python encapsulé strictement dans :
+## 2. Dépréciation : XML Tooling (`<tool_code>`) — REMOVED
+L’ancien mécanisme basé sur des balises XML (ex: `<tool_code>...</tool_code>`) est **déprécié** et **ne doit plus être utilisé**.
 
-```text
-<tool_code>
-# python code
-</tool_code>
+### 2.1 Pourquoi
+- **REQ_CORE_090** impose un protocole unifié JSON (`{"artifacts": [...]}`) pour générer des outils.
+- Les balises XML sont fragiles (parsing) et encouragent des workflows implicites.
+
+### 2.2 Remplacement
+Le protocole tooling est désormais : **Workbench Scripts + Exec**.
+
+## 3. Nouveau protocole : Workbench Scripts + Exec
+### 3.1 Génération (Step 1)
+Quand un outil est nécessaire (audit, inspection, maintenance), il doit être **créé** comme un script versionné dans :
+- `workbench/scripts/`
+
+La génération doit se faire via le protocole JSON standard (REQ_CORE_090), par exemple :
+```json
+{
+  "thought_process": "...",
+  "artifacts": [
+    {
+      "path": "workbench/scripts/structural_audit.py",
+      "operation": "create",
+      "content": "# python code"
+    }
+  ]
+}
 ```
 
-Ce mécanisme est imposé via le **System Prompt** (voir `src/ai_client.py`).
+### 3.2 Exécution explicite (Step 2)
+La génération et l’exécution sont **deux étapes distinctes** (REQ_CORE_095).
 
-## 3. Workflow d’exécution (Artifact-First)
-L’exécution d’un tool script suit une boucle automatique dans `src/main.py` :
+L’exécution se fait via la commande CLI interactive :
+- `exec <relative_path_under_workbench/scripts>`
 
-### 3.1 Détection
-Le wrapper scanne la réponse IA. Si elle contient `<tool_code>...</tool_code>`, il déclenche le flux outil.
+Exemples :
+- `exec structural_audit.py`
+- `exec audits/scan_repo.py`
 
-### 3.2 Étape d’artefacts
-Le wrapper crée un dossier :
+### 3.3 Sandbox d’exécution (REQ_CORE_055)
+L’exécution est effectuée par `WorkbenchRunner` :
+- **Restriction de chemin** : le script doit être situé **strictement** sous `workbench/scripts/`.
+- **Interdictions** : exécuter un script depuis `src/`, `/tmp`, ou tout autre chemin via ce runner est **FORBIDDEN**.
+- **Timeout** : `subprocess.run(..., timeout=60)`.
+- **Capture** : `stdout` et `stderr` sont capturés et affichés clairement.
 
-* `artifacts/step_YYYYMMDD_HHMMSS_tool_request/`
+## 4. Transparence & preuves (Artifact-First)
+Le protocole Workbench Scripts + Exec garantit :
+- le script est **versionné** (Git) et inspectable (`workbench/scripts/...`),
+- l’exécution est **explicite** (commande `exec`),
+- la sortie est affichée en console de manière claire (Return code + STDOUT/STDERR).
 
-Dans ce dossier, il écrit **avant exécution** :
+> Note : la sauvegarde systématique de la preuve d’exécution (`stdout/stderr`) comme artefact `.txt` peut être ajoutée en extension, mais le présent état documente le protocole effectif actuel.
 
-* `tool_script.py` (artefact 1)
-
-### 3.3 Exécution contrôlée
-Le wrapper exécute ensuite :
-
-* `python tool_script.py`
-
-**Garde-fous :**
-* pas de `shell=True`,
-* `cwd` fixé à la racine projet,
-* timeout (par défaut: 20s).
-
-### 3.4 Preuve d’exécution
-Après exécution, le wrapper écrit **dans le même dossier** :
-
-* `tool_output.txt` (artefact 2)
-
-Contenu :
-* `returncode`,
-* bloc `[STDOUT]`,
-* bloc `[STDERR]`.
-
-### 3.5 Boucle de feedback automatique (sans input utilisateur)
-Le wrapper renvoie immédiatement au modèle un message système :
-
-```text
-System: Tool executed. Artifacts saved. Output:
-<content of tool_output.txt>
-```
-
-Ce message est également logué dans le transcript (`sessions/<date>/transcript.log`) via la console.
-
-Le wrapper répète la boucle si la réponse suivante contient encore `<tool_code>` (avec un maximum d’itérations pour éviter les boucles infinies).
-
-## 4. Vérification utilisateur (Proof-First)
-L’utilisateur peut vérifier exactement ce qui a été exécuté en ouvrant :
-
-* `artifacts/.../tool_script.py` : la logique exacte exécutée localement
-* `artifacts/.../tool_output.txt` : la preuve (stdout/stderr)
-
-Ce protocole fournit une transparence “Glass Box” : aucune inspection locale n’est implicite ou non traçable.
-
-## 5. Intégration avec le manifest de session
-Les fichiers :
-* `tool_script.py`
-* `tool_output.txt`
-
-sont **trackés comme artefacts** et inclus dans le manifest d’intégrité de session (voir `src/artifact_manager.py` et `manifests/session_<session_id>_manifest.json`).
-
-## 6. Références
-* **Specs :** `specs/01_architecture_baseline.md` → REQ_AUDIT_060
-* **Code :**
-  * `src/ai_client.py` (System Prompt : instructions `<tool_code>`)
-  * `src/main.py` (boucle d’exécution Artifact-First)
-* **Traçabilité :** `traceability_matrix.md`
+## 5. Références
+- **Specs :** `specs/01_architecture_baseline.md` → REQ_AUDIT_060, REQ_CORE_055, REQ_CORE_090, REQ_CORE_095
+- **Code :**
+  - `src/workbench_runner.py` (sandbox runner)
+  - `src/main.py` (commande `exec`)
+- **Traçabilité :** `traceability_matrix.md`

@@ -18,6 +18,7 @@ from src.artifact_manager import GLOBAL_ARTIFACTS
 from src.context_manager import GLOBAL_CONTEXT
 from src.system_tools import SafeCommandRunner
 from src.utils import git_add_force_tracked_paths, git_commit_resilient, git_run_ok
+from src.workbench_runner import WorkbenchRunner
 
 SYSTEM_PROMPT_ARCHITECT = """
 You are a Senior Python Architect.
@@ -311,21 +312,65 @@ def _cmd_report() -> None:
     GLOBAL_CONSOLE.print(f"Ledger File: {ledger_file}")
 
 
+def _cmd_exec(tokens: list[str]) -> None:
+    """Execute a workbench script via WorkbenchRunner.
+
+    Usage:
+      exec <relative_path_under_workbench/scripts>
+
+    Example:
+      exec structural_audit.py
+      exec audits/scan_repo.py
+    """
+    if len(tokens) < 2:
+        GLOBAL_CONSOLE.error("Usage: exec <script_relative_path_under_workbench/scripts>")
+        return
+
+    rel_script = tokens[1]
+    runner = WorkbenchRunner(project_root=GLOBAL_CONFIG.project_root, timeout_s=60)
+
+    try:
+        rc, out, err = runner.run_script(rel_script)
+    except Exception as e:
+        GLOBAL_CONSOLE.error(f"Workbench exec blocked/failed: {e}")
+        return
+
+    GLOBAL_CONSOLE.print("--- Workbench Exec ---")
+    GLOBAL_CONSOLE.print(f"Script: workbench/scripts/{rel_script}")
+    GLOBAL_CONSOLE.print(f"Return code: {rc}")
+
+    if (out or "").strip():
+        GLOBAL_CONSOLE.print("[STDOUT]")
+        GLOBAL_CONSOLE.print(out.rstrip("\n"))
+    else:
+        GLOBAL_CONSOLE.print("[STDOUT] (empty)")
+
+    if (err or "").strip():
+        GLOBAL_CONSOLE.print("[STDERR]")
+        GLOBAL_CONSOLE.print(err.rstrip("\n"))
+    else:
+        GLOBAL_CONSOLE.print("[STDERR] (empty)")
+
+
 def _print_help():
     GLOBAL_CONSOLE.print("Available Albert commands:")
     GLOBAL_CONSOLE.print(
         "  implement [-f file] [--scope {full,code,specs,minimal}] - Execute an implementation task based on instructions"
     )
-    GLOBAL_CONSOLE.print("  test_ai             - Send a minimal test request to the AI")
-    GLOBAL_CONSOLE.print("  status              - Show git working tree status and last commit")
-    GLOBAL_CONSOLE.print("  report              - Show aggregated tokens and estimated cost (from audit_log.jsonl)")
-    GLOBAL_CONSOLE.print("  clear               - Clear the terminal screen")
-    GLOBAL_CONSOLE.print("  help                - Show this help message")
-    GLOBAL_CONSOLE.print("  exit                - Quit the CLI")
+    GLOBAL_CONSOLE.print("  exec <script.py>     - Execute a workbench script from workbench/scripts/ (restricted)")
+    GLOBAL_CONSOLE.print("  test_ai              - Send a minimal test request to the AI")
+    GLOBAL_CONSOLE.print("  status               - Show git working tree status and last commit")
+    GLOBAL_CONSOLE.print("  report               - Show aggregated tokens and estimated cost (from audit_log.jsonl)")
+    GLOBAL_CONSOLE.print("  clear                - Clear the terminal screen")
+    GLOBAL_CONSOLE.print("  help                 - Show this help message")
+    GLOBAL_CONSOLE.print("  exit                 - Quit the CLI")
 
     GLOBAL_CONSOLE.print("\nOptions for implement:")
     GLOBAL_CONSOLE.print("  -f, --file   Attach a local file (transient context for this request)")
     GLOBAL_CONSOLE.print("  --scope      Context scope to reduce tokens: full (default), code, specs, minimal")
+
+    GLOBAL_CONSOLE.print("\nOptions for exec:")
+    GLOBAL_CONSOLE.print("  exec <relative_path>  Path relative to workbench/scripts/ (only .py allowed; timeout=60s)")
 
 
 def _extract_attached_files(tokens: list[str]) -> list[str]:
@@ -435,30 +480,6 @@ def _trinity_protocol_consistency_check(generated_artifacts: list[str]) -> None:
         print("Please verify alignment manually or ask for a retrofit.")
 
 
-def _run_tool_script_and_capture(project_root: Path, script_path: Path, timeout_s: int = 20) -> tuple[int, str, str]:
-    try:
-        proc = subprocess.run(
-            [sys.executable, str(script_path)],
-            capture_output=True,
-            text=True,
-            check=False,
-            cwd=str(project_root),
-            timeout=timeout_s,
-        )
-        return int(proc.returncode), (proc.stdout or ""), (proc.stderr or "")
-    except subprocess.TimeoutExpired as e:
-        out = (getattr(e, "stdout", None) or "")
-        err = (getattr(e, "stderr", None) or "")
-        err = (err + "\n" if err else "") + f"[WRAPPER] Tool script timed out after {timeout_s}s"
-        return 124, out, err
-    except Exception as e:
-        return 1, "", f"[WRAPPER] Tool script execution failed: {e}"
-
-
-def _append_system_message_to_transcript(text: str) -> None:
-    GLOBAL_CONSOLE.print(text)
-
-
 def main():
     GLOBAL_CONSOLE.print("--- ALBERT (Your Personal AI Steward) ---")
 
@@ -478,7 +499,7 @@ def main():
     try:
         while True:
             user_input = GLOBAL_CONSOLE.input(
-                f"[{GLOBAL_CONFIG.project_root}]\nCommand (implement, test_ai, status, report, help, clear, exit): "
+                f"[{GLOBAL_CONFIG.project_root}]\nCommand (implement, exec, test_ai, status, report, help, clear, exit): "
             )
 
             try:
@@ -511,18 +532,18 @@ def main():
                 _cmd_report()
                 continue
 
+            if cmd == "exec":
+                _cmd_exec(tokens)
+                continue
+
             if cmd == "test_ai":
                 if not client:
                     client = AIClient()
 
                 GLOBAL_CONSOLE.print("Waiting for AI...")
-                # 1. On capture la réponse dans une variable
                 response_text, _stats = client.send_chat_request("You are helpful.", "Say Hello")
-
-                # 2. On l'affiche explicitement
                 GLOBAL_CONSOLE.print(f"\n🤖 AI Response:\n{response_text}\n")
                 continue
-
 
             if cmd == "implement":
                 if not client:
@@ -538,8 +559,6 @@ def main():
 
                 scope = _extract_scope(tokens[1:])
 
-                # TOOL EXECUTION / AI LOOP (isolated from Git). Even if Git later warns/fails,
-                # tool execution has already happened and must not be blocked.
                 try:
                     instruction = get_input_from_editor("Describe the implementation task")
 
@@ -593,14 +612,13 @@ def main():
                             dest_path.parent.mkdir(parents=True, exist_ok=True)
                             shutil.copyfile(artifact_path, dest_path)
 
-                        # GIT PHASE (separate from tool execution)
                         git_ok = True
                         try:
+                            # Ensure workbench is included in the tracked paths whitelist.
                             paths = ["project.json", "src", "specs", "impl-docs", "notes", "workbench"]
                             git_ok = git_add_force_tracked_paths(paths, cwd=str(GLOBAL_CONFIG.project_root))
 
                             if git_ok:
-                                # REQ_CORE_080: empty commit must be treated as SUCCESS (Warning)
                                 git_ok = git_commit_resilient(commit_message, cwd=str(GLOBAL_CONFIG.project_root))
 
                             if git_ok:
@@ -630,7 +648,6 @@ def main():
                                 f"Estimated Cost: input=${in_cost:.6f}, output=${out_cost:.6f}, total=${total_cost:.6f}"
                             )
                         else:
-                            # Must not crash; tool execution already completed.
                             GLOBAL_CONSOLE.error(
                                 "Git workflow did not complete successfully. Your changes may be applied locally but not committed/pushed."
                             )
