@@ -7,6 +7,7 @@ import difflib
 import shutil
 import shlex
 import uuid
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -73,8 +74,6 @@ RESPONSE FORMAT:
 }
 
 NOTE: If updating an existing file found in context, provide the FULL new content of the file, not just a diff.
-
-CRITICAL: Never generate files in the project root. Use `reports/`, `outputs/`, or `workbench/data/`.
 """
 
 
@@ -580,6 +579,137 @@ def _validate_next_action_target(target_script: str) -> tuple[bool, str, str]:
     return True, rel, ""
 
 
+def smart_deploy_and_commit(
+    artifact_folder: Path,
+    user_instruction: str,
+    client: AIClient,
+    hot_deployed_files: list[Path] | None = None,
+) -> bool:
+    """Centralized Smart Deploy & Commit pipeline.
+    
+    Logic:
+    1. Copy ALL files from artifact_folder to project root (no filter).
+    2. GIT ADD filter: Only add files in allowed paths (src/, specs/, impl-docs/, workbench/scripts/).
+    3. FORCE ADD hot-deployed files from the session.
+    4. Run pre-commit summary script.
+    5. Ask AI for semantic commit message.
+    6. Git commit.
+    """
+    project_root = GLOBAL_CONFIG.project_root
+    
+    if not artifact_folder.exists():
+        GLOBAL_CONSOLE.error(f"Artifact folder not found: {artifact_folder}")
+        return False
+
+    all_files = [p for p in artifact_folder.rglob("*") if p.is_file()]
+    # Filter out internal technical artifacts for copy
+    deployable_files = [
+        p for p in all_files 
+        if not p.name.endswith(".meta.json") 
+        and p.name != "raw_response_trace.jsonl"
+    ]
+
+    # 1. Copy ALL valid files (Sans Filtre for copy)
+    for artifact_path in deployable_files:
+        rel = artifact_path.relative_to(artifact_folder)
+        dest_path = (project_root / rel).resolve()
+        try:
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(artifact_path, dest_path)
+        except Exception as e:
+            GLOBAL_CONSOLE.error(f"Failed to copy {rel}: {e}")
+            return False
+
+    # 2. GIT ADD Filter
+    files_to_commit: list[str] = []
+    
+    # Check deployed files
+    for artifact_path in deployable_files:
+        rel = artifact_path.relative_to(artifact_folder)
+        # Normalization for path check
+        rel_str = str(rel).replace("\\", "/")
+        
+        # Allowed prefixes for tracking
+        if (
+            rel_str.startswith("src/")
+            or rel_str.startswith("specs/")
+            or rel_str.startswith("impl-docs/")
+            or rel_str.startswith("workbench/scripts/")
+        ):
+            dest_path = project_root / rel
+            try:
+                subprocess.run(
+                    ["git", "add", "-f", str(dest_path)],
+                    cwd=str(project_root),
+                    check=False
+                )
+                files_to_commit.append(str(dest_path))
+            except Exception as e:
+                GLOBAL_CONSOLE.error(f"Git add failed for {rel}: {e}")
+
+    # 3. Force Add Hot-Deployed Files
+    if hot_deployed_files:
+        for p in hot_deployed_files:
+            if p.exists():
+                try:
+                    subprocess.run(
+                        ["git", "add", "-f", str(p)],
+                        cwd=str(project_root),
+                        check=False
+                    )
+                    files_to_commit.append(str(p))
+                except Exception:
+                    pass
+
+    if not files_to_commit:
+        GLOBAL_CONSOLE.print("No files matched the allowed paths for git tracking.")
+        return False
+
+    # 4. Audit Summary
+    runner = WorkbenchRunner(project_root=project_root, timeout_s=30)
+    summary_script = "git_pre_commit_summary.py"
+    summary_output = ""
+    
+    # Check if summary script exists
+    if (project_root / "workbench/scripts" / summary_script).exists():
+        rc, out, err = runner.run_script(summary_script)
+        if rc == 0:
+            summary_output = out
+        else:
+            GLOBAL_CONSOLE.error(f"Summary script failed: {err}")
+            summary_output = "(Summary script unavailable)"
+    else:
+        # Fallback if script missing (bootstrapping)
+        summary_output = "git_pre_commit_summary.py not found. Files staged: " + ", ".join([str(Path(f).relative_to(project_root)) for f in files_to_commit[:5]])
+
+    # 5. AI Commit Message
+    system_msg = "You are a Semantic Commit Message Generator. Output ONLY the commit message (e.g. feat(scope): message)."
+    user_msg = f"Instruction: {user_instruction}\n\nStaged Summary:\n{summary_output}"
+    
+    try:
+        GLOBAL_CONSOLE.print("🤖 Generating semantic commit message...")
+        commit_msg_response, _ = client.send_chat_request(system_msg, user_msg)
+        commit_message = commit_msg_response.strip().strip('"').strip("'")
+    except Exception as e:
+        GLOBAL_CONSOLE.error(f"AI Commit Message generation failed: {e}")
+        commit_message = f"chore: apply changes from {user_instruction[:30]}"
+
+    GLOBAL_CONSOLE.print(f"📝 Commit Message: {commit_message}")
+
+    # 6. Git Commit
+    if git_commit_resilient(commit_message, cwd=str(project_root)):
+        if git_run_ok(["push"], cwd=str(project_root)):
+            head = _get_head_commit_sha(str(project_root))
+            GLOBAL_CONSOLE.print(f"✅ Success: Changes applied and pushed. (commit: {head})")
+            return True
+        else:
+            GLOBAL_CONSOLE.error("❌ Push failed.")
+            return False
+    else:
+        GLOBAL_CONSOLE.error("❌ Commit failed.")
+        return False
+
+
 def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
     """Run the main AI prompt -> artifacts -> (optional rebound loop) -> review/apply -> git -> audit flow.
 
@@ -615,6 +745,9 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
     # Track ALL artifacts generated across rebound turns (for Trinity warnings + final review)
     all_generated_files: list[str] = []
     final_step_id: str | None = None
+    
+    # Track hot-deployed files to ensure they are committed
+    hot_deployed_files: list[Path] = []
 
     try:
         instruction = get_input_from_editor("Describe the prompt/task for Albert's AI brain")
@@ -710,13 +843,15 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
                     if str(generated_file).endswith(target_script):
                         found_artifact_path = Path(generated_file)
                         break
-
+                
                 if found_artifact_path:
                     dest_path = GLOBAL_CONFIG.project_root / target_script
                     try:
                         dest_path.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy(found_artifact_path, dest_path)
                         GLOBAL_CONSOLE.print(f"⚡ Auto-deployed script to: {dest_path}")
+                        # Track for final commit
+                        hot_deployed_files.append(dest_path)
                     except Exception as e:
                         GLOBAL_CONSOLE.error(f"Failed to auto-deploy script: {e}")
                 # ----------------------------------
@@ -772,88 +907,33 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
     # Final step: review/apply only if we have a final step folder and any generated files
     if final_step_id and all_generated_files:
         artifact_folder = GLOBAL_CONFIG.project_root / "artifacts" / final_step_id
-
-        commit_message = (instruction or "").strip() or f"Prompt changes ({final_step_id})"
-        should_apply = review_and_apply(artifact_folder=artifact_folder, commit_message=commit_message)
+        
+        # NOTE: We implicitly review the last folder. If multiple folders, we rely on cumulative effect or last step containing deliverables.
+        
+        commit_message_hint = (instruction or "").strip() or f"Prompt changes ({final_step_id})"
+        should_apply = review_and_apply(artifact_folder=artifact_folder, commit_message=commit_message_hint)
 
         if should_apply:
-            artifact_files = [p for p in Path(artifact_folder).rglob("*") if p.is_file()]
-            artifact_files.sort(key=lambda p: str(p))
+            # --- SMART DEPLOYMENT CALL ---
+            success = smart_deploy_and_commit(
+                artifact_folder=artifact_folder,
+                user_instruction=instruction,
+                client=client,
+                hot_deployed_files=hot_deployed_files
+            )
+            
+            if success:
+                # Logging / Stats display
+                pt = int((usage_stats or {}).get("prompt_tokens", 0) or 0)
+                ct = int((usage_stats or {}).get("completion_tokens", 0) or 0)
+                tt = int((usage_stats or {}).get("total_tokens", 0) or 0)
+                in_cost, out_cost, total_cost = _estimate_cost_usd(usage_stats)
 
-            for artifact_path in artifact_files:
-                # --- FIX: SECURITY FILTER DURING COPY ---
-                # On empêche la copie des fichiers techniques même s'ils sont dans le dossier
-                if artifact_path.name.endswith(".meta.json") or artifact_path.name == "raw_response_trace.jsonl":
-                    continue
-                # ----------------------------------------
-
-                rel = artifact_path.relative_to(artifact_folder)
-                dest_path = (GLOBAL_CONFIG.project_root / rel).resolve()
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(artifact_path, dest_path)
-
-            git_ok = True
-            head_sha: str | None = None
-            try:
-                paths = ["project.json", "src", "specs", "impl-docs", "notes", "workbench"]
-                git_ok = git_add_force_tracked_paths(paths, cwd=str(GLOBAL_CONFIG.project_root))
-
-                if git_ok:
-                    # --- Smart Commit v0.3: pre-commit summary + semantic message ---
-                    # LOCATE: inside `if should_apply:` and before `git_commit_resilient`.
-                    # 1) Run workbench/scripts/git_pre_commit_summary.py via WorkbenchRunner
-                    # 2) Ask AI to generate a semantic commit message based on summary output
-                    wb = WorkbenchRunner(project_root=GLOBAL_CONFIG.project_root, timeout_s=60)
-                    rc_sum, out_sum, err_sum = wb.run_script("git_pre_commit_summary.py", script_args=[])
-
-                    summary_block = (
-                        "=== PRE-COMMIT SUMMARY (from git_pre_commit_summary.py) ===\n"
-                        f"[RETURN_CODE]\n{rc_sum}\n\n"
-                        f"[STDOUT]\n{out_sum or ''}\n\n"
-                        f"[STDERR]\n{err_sum or ''}\n"
-                    )
-
-                    semantic_prompt = (
-                        "You are a semantic commit message generator.\n"
-                        "Given the staged git summary below, produce a single-line commit message.\n\n"
-                        "Rules:\n"
-                        "- Output ONLY the commit subject line (no markdown, no quotes, no extra lines).\n"
-                        "- Use Conventional Commits style: <type>(<scope>): <subject> when possible.\n"
-                        "- Keep it concise (<= 72 chars).\n"
-                        "- If no staged files, output: chore: no-op\n\n"
-                        f"{summary_block}"
-                    )
-
-                    msg_text, _msg_usage = client.send_chat_request(
-                        system_prompt="You generate concise git commit subject lines.",
-                        user_prompt=semantic_prompt,
-                    )
-
-                    candidate = (msg_text or "").strip()
-                    # Take first non-empty line only
-                    commit_message = ""
-                    for line in candidate.splitlines():
-                        line = line.strip()
-                        if line:
-                            commit_message = line
-                            break
-                    if not commit_message:
-                        commit_message = "chore: update"
-                    # --- end Smart Commit v0.3 ---
-
-                    git_ok = git_commit_resilient(commit_message, cwd=str(GLOBAL_CONFIG.project_root))
-
-                if git_ok:
-                    git_ok = git_run_ok(["push"], cwd=str(GLOBAL_CONFIG.project_root))
-
-                if git_ok:
-                    head_sha = _get_head_commit_sha(cwd=str(GLOBAL_CONFIG.project_root))
-
-            except Exception as e:
-                git_ok = False
-                GLOBAL_CONSOLE.error(f"❌ Git Error: unexpected failure: {e}")
-
-            if git_ok:
+                GLOBAL_CONSOLE.print(f"Token Usage: prompt={pt}, completion={ct}, total={tt}")
+                GLOBAL_CONSOLE.print(
+                    f"Estimated Cost: input=${in_cost:.6f}, output=${out_cost:.6f}, total=${total_cost:.6f}"
+                )
+                
                 GLOBAL_LEDGER.log_transaction(
                     session_id=session_id,
                     user_instruction=(instruction or "").strip(),
@@ -861,25 +941,8 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
                     usage_stats=usage_stats,
                     status="success",
                 )
-
-                pt = int((usage_stats or {}).get("prompt_tokens", 0) or 0)
-                ct = int((usage_stats or {}).get("completion_tokens", 0) or 0)
-                tt = int((usage_stats or {}).get("total_tokens", 0) or 0)
-                in_cost, out_cost, total_cost = _estimate_cost_usd(usage_stats)
-
-                if head_sha:
-                    GLOBAL_CONSOLE.print(f"✅ Success: Changes applied and pushed. (commit: {head_sha})")
-                else:
-                    GLOBAL_CONSOLE.print("✅ Success: Changes applied and pushed.")
-
-                GLOBAL_CONSOLE.print(f"Token Usage: prompt={pt}, completion={ct}, total={tt}")
-                GLOBAL_CONSOLE.print(
-                    f"Estimated Cost: input=${in_cost:.6f}, output=${out_cost:.6f}, total=${total_cost:.6f}"
-                )
             else:
-                GLOBAL_CONSOLE.error(
-                    "Git workflow did not complete successfully. Your changes may be applied locally but not committed/pushed."
-                )
+                 GLOBAL_CONSOLE.error("Smart Deployment failed (see errors above).")
 
         else:
             GLOBAL_CONSOLE.print("Changes were not applied.")
