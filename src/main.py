@@ -691,7 +691,7 @@ def main():
                         # GIT PHASE (separate from tool execution)
                         git_ok = True
                         try:
-                            paths = ["project.json", "src", "specs", "impl-docs", "notes"]
+                            paths = ["project.json", "src", "specs", "impl-docs", "notes", "workbench"]
                             git_ok = git_add_force_tracked_paths(paths, cwd=str(GLOBAL_CONFIG.project_root))
 
                             if git_ok:
