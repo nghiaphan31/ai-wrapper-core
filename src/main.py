@@ -73,6 +73,8 @@ RESPONSE FORMAT:
 }
 
 NOTE: If updating an existing file found in context, provide the FULL new content of the file, not just a diff.
+
+CRITICAL: Never generate files in the project root. Use `reports/`, `outputs/`, or `workbench/data/`.
 """
 
 
@@ -708,7 +710,7 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
                     if str(generated_file).endswith(target_script):
                         found_artifact_path = Path(generated_file)
                         break
-                
+
                 if found_artifact_path:
                     dest_path = GLOBAL_CONFIG.project_root / target_script
                     try:
@@ -797,6 +799,48 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
                 git_ok = git_add_force_tracked_paths(paths, cwd=str(GLOBAL_CONFIG.project_root))
 
                 if git_ok:
+                    # --- Smart Commit v0.3: pre-commit summary + semantic message ---
+                    # LOCATE: inside `if should_apply:` and before `git_commit_resilient`.
+                    # 1) Run workbench/scripts/git_pre_commit_summary.py via WorkbenchRunner
+                    # 2) Ask AI to generate a semantic commit message based on summary output
+                    wb = WorkbenchRunner(project_root=GLOBAL_CONFIG.project_root, timeout_s=60)
+                    rc_sum, out_sum, err_sum = wb.run_script("git_pre_commit_summary.py", script_args=[])
+
+                    summary_block = (
+                        "=== PRE-COMMIT SUMMARY (from git_pre_commit_summary.py) ===\n"
+                        f"[RETURN_CODE]\n{rc_sum}\n\n"
+                        f"[STDOUT]\n{out_sum or ''}\n\n"
+                        f"[STDERR]\n{err_sum or ''}\n"
+                    )
+
+                    semantic_prompt = (
+                        "You are a semantic commit message generator.\n"
+                        "Given the staged git summary below, produce a single-line commit message.\n\n"
+                        "Rules:\n"
+                        "- Output ONLY the commit subject line (no markdown, no quotes, no extra lines).\n"
+                        "- Use Conventional Commits style: <type>(<scope>): <subject> when possible.\n"
+                        "- Keep it concise (<= 72 chars).\n"
+                        "- If no staged files, output: chore: no-op\n\n"
+                        f"{summary_block}"
+                    )
+
+                    msg_text, _msg_usage = client.send_chat_request(
+                        system_prompt="You generate concise git commit subject lines.",
+                        user_prompt=semantic_prompt,
+                    )
+
+                    candidate = (msg_text or "").strip()
+                    # Take first non-empty line only
+                    commit_message = ""
+                    for line in candidate.splitlines():
+                        line = line.strip()
+                        if line:
+                            commit_message = line
+                            break
+                    if not commit_message:
+                        commit_message = "chore: update"
+                    # --- end Smart Commit v0.3 ---
+
                     git_ok = git_commit_resilient(commit_message, cwd=str(GLOBAL_CONFIG.project_root))
 
                 if git_ok:
