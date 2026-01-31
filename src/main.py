@@ -514,8 +514,15 @@ def main():
             if cmd == "test_ai":
                 if not client:
                     client = AIClient()
-                client.send_chat_request("You are helpful.", "Say Hello")
+
+                GLOBAL_CONSOLE.print("Waiting for AI...")
+                # 1. On capture la réponse dans une variable
+                response_text, _stats = client.send_chat_request("You are helpful.", "Say Hello")
+
+                # 2. On l'affiche explicitement
+                GLOBAL_CONSOLE.print(f"\n🤖 AI Response:\n{response_text}\n")
                 continue
+
 
             if cmd == "implement":
                 if not client:
