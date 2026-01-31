@@ -1,6 +1,6 @@
 # Project Albert — Documentation d'Implémentation : Core System
-**Version :** 0.1.0 (Itération 1)
-**Date :** 2026-01-28
+**Version :** 0.1.1 (Itération 1)
+**Date :** 2026-01-31
 
 ## 1. Vue d'ensemble
 **Project Albert** est un outil local-first qui agit comme un *steward* (intendant) rigoureux entre l’Utilisateur et le Modèle IA.
@@ -177,6 +177,19 @@ Si ce code de retour est traité comme une erreur fatale (exception), la boucle 
   * `git_run_ok(...)`
   * `git_add_force_tracked_paths(...)`
 
+#### 1.7.4 UX : affichage du SHA après push
+Après un `implement` réussi (merge + commit + push), Albert affiche désormais le **SHA du commit HEAD** dans le message de succès.
+
+* **Où :** `src/main.py` (flux `implement`)
+* **Commande utilisée :** `git rev-parse HEAD`
+* **Comportement :**
+  * si le SHA est récupérable :
+    * `✅ Success: Changes applied and pushed. (commit: <sha>)`
+  * sinon :
+    * fallback sur le message historique sans SHA.
+
+> Note : si `git commit` a été un soft-success ("nothing to commit"), le SHA affiché correspond au HEAD courant (dernier commit existant), ce qui reste utile pour la traçabilité.
+
 ## 2. Modules Principaux (`src/`)
 
 ### 2.1 Configuration (`config.py`)
@@ -342,6 +355,7 @@ Si (et seulement si) la revue interactive est validée pour **tous** les fichier
 
 3. Albert écrit une entrée dans `audit_log.jsonl` (transaction `success`) incluant les tokens.
 4. Albert affiche en console : **Token Usage** et **Estimated Cost**.
+5. Albert affiche le **SHA du commit (HEAD)** quand il est disponible.
 
 **Résultat :** une exécution `implement` validée aboutit à une modification **appliquée**, **commitée** et **poussée** automatiquement.
 

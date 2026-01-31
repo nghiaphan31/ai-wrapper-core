@@ -480,6 +480,28 @@ def _trinity_protocol_consistency_check(generated_artifacts: list[str]) -> None:
         print("Please verify alignment manually or ask for a retrofit.")
 
 
+def _get_head_commit_sha(cwd: str) -> str | None:
+    """Return current HEAD commit SHA (full) or None if unavailable."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=cwd,
+        )
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+
+    if proc.returncode != 0:
+        return None
+
+    sha = (proc.stdout or "").strip()
+    return sha or None
+
+
 def main():
     GLOBAL_CONSOLE.print("--- ALBERT (Your Personal AI Steward) ---")
 
@@ -613,6 +635,7 @@ def main():
                             shutil.copyfile(artifact_path, dest_path)
 
                         git_ok = True
+                        head_sha: str | None = None
                         try:
                             # Ensure workbench is included in the tracked paths whitelist.
                             paths = ["project.json", "src", "specs", "impl-docs", "notes", "workbench"]
@@ -623,6 +646,10 @@ def main():
 
                             if git_ok:
                                 git_ok = git_run_ok(["push"], cwd=str(GLOBAL_CONFIG.project_root))
+
+                            # After successful push, capture HEAD SHA for user visibility.
+                            if git_ok:
+                                head_sha = _get_head_commit_sha(cwd=str(GLOBAL_CONFIG.project_root))
 
                         except Exception as e:
                             git_ok = False
@@ -642,7 +669,11 @@ def main():
                             tt = int((usage_stats or {}).get("total_tokens", 0) or 0)
                             in_cost, out_cost, total_cost = _estimate_cost_usd(usage_stats)
 
-                            GLOBAL_CONSOLE.print("✅ Success: Changes applied and pushed.")
+                            if head_sha:
+                                GLOBAL_CONSOLE.print(f"✅ Success: Changes applied and pushed. (commit: {head_sha})")
+                            else:
+                                GLOBAL_CONSOLE.print("✅ Success: Changes applied and pushed.")
+
                             GLOBAL_CONSOLE.print(f"Token Usage: prompt={pt}, completion={ct}, total={tt}")
                             GLOBAL_CONSOLE.print(
                                 f"Estimated Cost: input=${in_cost:.6f}, output=${out_cost:.6f}, total=${total_cost:.6f}"
