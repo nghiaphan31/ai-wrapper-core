@@ -66,6 +66,57 @@ class AIClient:
             "total_tokens": total_tokens,
         }
 
+    # -----------------------------
+    # Wire Tap (Interaction Logging)
+    # -----------------------------
+    def _log_interaction(self, request_id: str, system_prompt: str, user_prompt: str, response_text: str) -> None:
+        """Wire Tap: log the high-level interaction in an append-only way.
+
+        This is intentionally lightweight and separate from raw exchanges.
+        It is meant to provide fast human-readable auditability.
+
+        Storage:
+          sessions/<YYYY-MM-DD>/wire_tap/<uuid>.json
+
+        Safety:
+          - Best-effort: failures must not crash the workflow.
+          - Does not store secrets (API key not included).
+        """
+        try:
+            session_date = datetime.now().strftime("%Y-%m-%d")
+            tap_dir = self.project_root / "sessions" / session_date / "wire_tap"
+            tap_dir.mkdir(parents=True, exist_ok=True)
+
+            tap_path = tap_dir / f"{request_id}.json"
+
+            payload = {
+                "request_id": request_id,
+                "timestamp": datetime.now().isoformat(),
+                "model_used": self.model_name,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "response_text": response_text,
+            }
+
+            with open(tap_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+
+            # Optional ledger link (best effort)
+            try:
+                payload_ref = f"sessions/{session_date}/wire_tap/{request_id}.json"
+                GLOBAL_LEDGER.log_event(
+                    actor="wrapper",
+                    action_type="wire_tap",
+                    payload_ref=payload_ref,
+                    artifacts=[payload_ref],
+                )
+            except Exception:
+                pass
+
+        except Exception as e:
+            # Must not crash the main flow
+            GLOBAL_CONSOLE.error(f"Wire Tap logging failed: {e}")
+
     def _log_raw_exchange(self, request_id: str, raw_data: dict) -> tuple[Path, str] | tuple[None, None]:
         """Persist the raw request/response exchange to the date-scoped session path.
 
@@ -112,37 +163,32 @@ class AIClient:
         REQ_CORE_060 (The Trinity Protocol) is enforced here by injecting a mandatory
         instruction block into the system message.
 
-        REQ_AUDIT_060 (Artifact-First Tool Execution) is enforced here by instructing
-        the model to request tool execution via <tool_code> tags.
-
         Note:
-          - This does not replace the existing rules; it appends strict governance layers.
           - Runtime enforcement is implemented in src/main.py.
         """
         base = (base_system_prompt or "").rstrip()
 
+        # CRITICAL CHANGE (requested): relax Trinity wording.
         trinity_block = (
             "\n\n"
-            "TRINITY PROTOCOL ENABLED: You manage a strict ecosystem of Specs, Code, and Docs.\n"
-            "1. NEVER output Code without checking if `impl-docs/` needs an update.\n"
-            "2. NEVER implement a feature without checking if `specs/` needs a retrofit.\n"
-            "3. If you change one, you must evaluate the others.\n"
-            "Failure to align all three layers is a critical error.\n"
+            "TRINITY PROTOCOL: You are encouraged to keep Specs, Code, and Docs aligned. "
+            "If you modify code, try to identify corresponding doc updates. "
+            "If unable, explicitely state 'Docs update deferred' in your thought process.\n"
         )
 
         tool_usage_block = (
             "\n"
-	    "DO NOT use XML tags. Use JSON artifacts only."
-		        )
+            "DO NOT use XML tags. Use JSON artifacts only."
+        )
 
         return f"{base}{trinity_block}{tool_usage_block}"
 
     def send_chat_request(self, system_prompt: str, user_prompt: str) -> tuple[str, dict]:
-        """Envoie une requête à l'IA, logue tout (Raw + Ledger), et retourne (content, usage_stats)."""
+        """Envoie une requête à l'IA, logue tout (WireTap + Raw + Ledger), et retourne (content, usage_stats)."""
         request_id = str(uuid.uuid4())
         timestamp = datetime.now().isoformat()
 
-        # REQ_CORE_060 + REQ_AUDIT_060: ensure the final system prompt includes governance blocks.
+        # Ensure the final system prompt includes governance blocks.
         system_prompt = self.build_system_prompt(system_prompt)
 
         # 1. Préparation de la payload
@@ -166,6 +212,14 @@ class AIClient:
 
             # 3b. Extraction usage stats (tokens)
             usage_stats = self._extract_usage_stats(response)
+
+            # 3c. Wire Tap log (best-effort)
+            self._log_interaction(
+                request_id=request_id,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_text=content,
+            )
 
             # 4. Sauvegarde des échanges bruts (Raw Exchange)
             raw_data = {
