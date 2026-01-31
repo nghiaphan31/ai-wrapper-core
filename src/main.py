@@ -779,6 +779,12 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
             artifact_files.sort(key=lambda p: str(p))
 
             for artifact_path in artifact_files:
+                # --- FIX: SECURITY FILTER DURING COPY ---
+                # On empêche la copie des fichiers techniques même s'ils sont dans le dossier
+                if artifact_path.name.endswith(".meta.json") or artifact_path.name == "raw_response_trace.jsonl":
+                    continue
+                # ----------------------------------------
+
                 rel = artifact_path.relative_to(artifact_folder)
                 dest_path = (GLOBAL_CONFIG.project_root / rel).resolve()
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
