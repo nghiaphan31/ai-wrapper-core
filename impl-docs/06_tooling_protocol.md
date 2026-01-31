@@ -1,5 +1,5 @@
 # Documentation Implémentation : Tooling Protocol (Workbench Scripts + Exec)
-**Version :** 0.2.1
+**Version :** 0.2.2
 **Date :** 2026-01-31
 
 ## 1. Objectif
@@ -9,7 +9,7 @@ Ce document décrit le protocole d’exécution d’outils locaux en mode **Glas
 - **REQ_CORE_090** (Unified Generation Protocol — JSON, pas XML)
 - **REQ_CORE_095** (Explicit Execution Request)
 
-Le principe : **aucune exécution locale “outil” ne doit être opaque**. Toute logique exécutée doit être vérifiable a posteriori via des artefacts persistants.
+Le principe : **aucune exécution locale “outil” ne doit être opaque**. Toute logique exécutée doit être vérifiable a posteriori.
 
 ## 2. Dépréciation : XML Tooling (`<tool_code>`) — REMOVED
 L’ancien mécanisme basé sur des balises XML (ex: `<tool_code>...</tool_code>`) est **déprécié** et **ne doit plus être utilisé**.
@@ -21,7 +21,7 @@ L’ancien mécanisme basé sur des balises XML (ex: `<tool_code>...</tool_code>
 ### 2.2 Remplacement
 Le protocole tooling est désormais : **Workbench Scripts + Exec**.
 
-## 3. Nouveau protocole : Workbench Scripts + Exec
+## 3. Protocole : Workbench Scripts + Exec
 ### 3.1 Génération (Step 1)
 Quand un outil est nécessaire (audit, inspection, maintenance), il doit être **créé** comme un script versionné dans :
 - `workbench/scripts/`
@@ -44,18 +44,20 @@ La génération doit se faire via le protocole JSON standard (REQ_CORE_090), par
 La génération et l’exécution sont **deux étapes distinctes** (REQ_CORE_095).
 
 L’exécution se fait via la commande CLI interactive :
-- `exec <relative_path>`
+- `exec <script.py> [args...]`
 
-**Format attendu (implémentation actuelle) :**
-- le chemin fourni à `exec` est **relatif à la racine projet**,
-- mais doit **résoudre strictement sous** `workbench/scripts/` (sandbox REQ_CORE_055).
+**Comportement effectif (implémentation actuelle, alignée UX) :**
+- l’argument `<script.py>` est un chemin **relatif à `workbench/scripts/`** (et non plus un chemin relatif à la racine projet),
+- les arguments suivants sont passés tels quels au script.
 
 Exemples valides :
-- `exec workbench/scripts/structural_audit.py`
-- `exec workbench/scripts/audits/scan_repo.py`
+- `exec hello_world.py`
+- `exec audits/scan_repo.py --flag value`
 
-> Note: historiquement, la doc indiquait un chemin relatif à `workbench/scripts/` directement.
-> Le comportement effectif actuel accepte un chemin relatif à la racine projet (ex: `workbench/scripts/...`) tout en conservant la restriction de sécurité (must be under `workbench/scripts/`).
+Exemples invalides (bloqués) :
+- `exec /tmp/x.py` (chemin absolu)
+- `exec ../src/main.py` (sort de `workbench/scripts/`)
+- `exec workbench/scripts/hello_world.py` (désormais à éviter : le préfixe `workbench/scripts/` n’est plus attendu)
 
 ### 3.3 Sandbox d’exécution (REQ_CORE_055)
 L’exécution est effectuée par `WorkbenchRunner` :

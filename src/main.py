@@ -316,27 +316,33 @@ def _cmd_exec(tokens: list[str]) -> None:
     """Execute a workbench script via WorkbenchRunner.
 
     Usage:
-      exec <relative_path_under_workbench/scripts>
+      exec <script.py> [args...]
 
-    Example:
-      exec structural_audit.py
-      exec audits/scan_repo.py
+    Where <script.py> is a path relative to workbench/scripts/.
+
+    Examples:
+      exec hello_world.py
+      exec audits/scan_repo.py --flag value
     """
     if len(tokens) < 2:
-        GLOBAL_CONSOLE.error("Usage: exec <script_relative_path_under_workbench/scripts>")
+        GLOBAL_CONSOLE.error("Usage: exec <script.py> [args...] (script path is relative to workbench/scripts/)")
         return
 
     rel_script = tokens[1]
+    script_args = tokens[2:]
+
     runner = WorkbenchRunner(project_root=GLOBAL_CONFIG.project_root, timeout_s=60)
 
     try:
-        rc, out, err = runner.run_script(rel_script)
+        rc, out, err = runner.run_script(rel_script, script_args=script_args)
     except Exception as e:
         GLOBAL_CONSOLE.error(f"Workbench exec blocked/failed: {e}")
         return
 
     GLOBAL_CONSOLE.print("--- Workbench Exec ---")
     GLOBAL_CONSOLE.print(f"Script: workbench/scripts/{rel_script}")
+    if script_args:
+        GLOBAL_CONSOLE.print(f"Args: {' '.join(script_args)}")
     GLOBAL_CONSOLE.print(f"Return code: {rc}")
 
     if (out or "").strip():
@@ -357,7 +363,9 @@ def _print_help():
     GLOBAL_CONSOLE.print(
         "  implement [-f file] [--scope {full,code,specs,minimal}] - Execute an implementation task based on instructions"
     )
-    GLOBAL_CONSOLE.print("  exec <script.py>     - Execute a workbench script from workbench/scripts/ (restricted)")
+    GLOBAL_CONSOLE.print(
+        "  exec <script.py> [args...] - Execute a workbench script from workbench/scripts/ (restricted)"
+    )
     GLOBAL_CONSOLE.print("  test_ai              - Send a minimal test request to the AI")
     GLOBAL_CONSOLE.print("  status               - Show git working tree status and last commit")
     GLOBAL_CONSOLE.print("  report               - Show aggregated tokens and estimated cost (from audit_log.jsonl)")
@@ -370,7 +378,9 @@ def _print_help():
     GLOBAL_CONSOLE.print("  --scope      Context scope to reduce tokens: full (default), code, specs, minimal")
 
     GLOBAL_CONSOLE.print("\nOptions for exec:")
-    GLOBAL_CONSOLE.print("  exec <relative_path>  Path relative to workbench/scripts/ (only .py allowed; timeout=60s)")
+    GLOBAL_CONSOLE.print(
+        "  exec <script.py> [args...]  Script path relative to workbench/scripts/ (only .py allowed; timeout=60s)"
+    )
 
 
 def _extract_attached_files(tokens: list[str]) -> list[str]:
