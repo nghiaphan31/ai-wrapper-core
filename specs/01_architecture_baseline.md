@@ -44,7 +44,7 @@ Arborescence racine : `~/ai-work/projects/<project_slug>/`
 * `impl-docs/` [GIT] : Documentation technique vivante (auto-générée ou maintenue).
 * `notes/` [GIT] : Mémoire contextuelle long-terme (summary.md, decisions.md, todo.md).
 * `workbench/` [GIT] : Espace de *stewardship tooling* pour scripts opérationnels (audit, maintenance) versionnés mais distincts du livrable `src/`.
-  * `workbench/scripts/` [GIT] : Scripts opérationnels exécutables manuellement (audit/maintenance). Voir **REQ_ARCH_020**.
+  * `workbench/scripts/` [GIT] : Scripts opérationnels exécutables manuellement (audit/maintenance). Voir **REQ_ARCH_020** et **REQ_ARCH_021**.
 * `secrets/` [NO GIT] : API Keys, configurations spécifiques à la machine locale. Doit être dans .gitignore.
 * `sessions/` [NO GIT] : Historique volumineux. Contient désormais pour chaque session :
     * `transcript.log` : Copie intégrale des E/S terminal (User <-> Wrapper).
@@ -90,6 +90,17 @@ Les scripts opérationnels (Audit, Maintenance) MUST être stockés dans `workbe
 * Éviter la confusion entre livrable applicatif (`src/`) et outillage d’intendance.
 * Réduire les erreurs de parsing “Artifact/Tooling” en donnant un emplacement stable et permanent aux scripts d’audit/maintenance.
 * Permettre l’exécution manuelle immédiate de scripts d’inspection, tout en les gardant sous contrôle Git.
+
+### 5.3 The Workbench Protocol (REQ_ARCH_021)
+**REQ_ARCH_021 (The Workbench Protocol) :**
+Tous les scripts opérationnels (Audit, Analysis, Maintenance) générés par l’IA MUST être stockés dans `workbench/scripts/`.
+
+**Règles :**
+* Ces scripts sont des actifs d’intendance (*stewardship assets*) **versionnés (Git)**.
+* Ils sont **strictement séparés** du livrable produit dans `src/`.
+
+**Rationale :**
+Construire une bibliothèque permanente d’outils (inspecteurs, audits, maintenance) au lieu d’artefacts jetables.
 
 ## 6) Workflow Séquentiel (Cycle de Vie)
 Le travail est strictement divisé en deux phases distinctes.
@@ -163,7 +174,33 @@ Toute exécution locale orchestrée par le wrapper au titre d’“inspection”
 2) **Preuve après exécution** : la sortie d’exécution (`stdout` et `stderr`) DOIT être sauvegardée comme artefact permanent (fichier `.txt`) **APRÈS** l’exécution.
 3) **Manifeste de session** : le script et la preuve (output) DOIVENT être inclus dans le manifest d’intégrité de session (session manifest).
 
+**Alignement protocolaire :**
+* La génération d’outils se fait via le **protocole JSON standard** (voir REQ_CORE_090).
+* La génération d’un script (création d’un fichier) et son exécution sont **deux étapes distinctes** nécessitant une validation explicite (voir REQ_CORE_095).
+
 **But :** permettre à l’utilisateur d’ouvrir `tool_script.py` et `tool_output.txt` pour vérifier exactement ce qui a été exécuté et ce qui a été observé.
+
+### 7.2 Unified Generation & Execution Sandbox (REQ_CORE_090 / REQ_CORE_095 / REQ_CORE_055)
+Cette section formalise la chaîne “outillage” robuste, sans protocole fragile, et avec sandbox d’exécution dédiée.
+
+**REQ_CORE_090 (Unified Generation Protocol) :**
+L’IA MUST NOT utiliser de tags XML (par ex. `<tool_code>`) pour générer des outils.
+L’IA DOIT utiliser le protocole JSON standard (réponse structurée `{"artifacts": [...]}`) pour créer des scripts dans `workbench/scripts/`.
+
+**Rationale :** parsing robuste, cohérence “Zero Copy-Paste”, et réduction des erreurs de transfert.
+
+**REQ_CORE_095 (Explicit Execution Request) :**
+La génération d’un outil et son exécution sont DISTINCTES.
+L’IA NE PEUT PAS “auto-exécuter” un script dans le même tour que sa génération.
+Workflow attendu :
+1. Générer le script (JSON → écriture fichier) ;
+2. Validation User/System ;
+3. Exécution via commande explicite.
+
+**REQ_CORE_055 (Workbench Execution Sandbox) :**
+Le système MUST fournir un `WorkbenchRunner` strictement restreint à l’exécution de scripts situés dans `workbench/scripts/`.
+L’exécution de scripts dans `src/`, `/tmp`, ou tout autre chemin via ce runner est FORBIDDEN.
+La sortie (`stdout`/`stderr`) MUST être capturée comme un artefact texte.
 
 ## 8) Comptabilité tokens & coûts (fonction “vraie estimation”)
 Le wrapper doit être capable d’estimer et suivre les coûts réels, pas “au feeling”.
@@ -176,7 +213,7 @@ Optionnel : distinguer catégories (draft vs final, etc.) si le wrapper les enco
 
 ## 9) Politique & configuration (YAML/JSON)
 Chaque projet doit pouvoir définir une policy (concept) :
-* modèle IA (snapshot/alias),
+* modèle IA (snapshot),
 * budgets (caps par jour/mois/projet),
 * limites de taille contexte,
 * règles d’inclusion/exclusion d’extraits,
@@ -377,6 +414,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_DATA_013 | DATA | Flux de production : l’IA génère des propositions dans `artifacts/` ou `outputs/` ; après validation humaine, les fichiers sont déplacés/mergés dans `src/` et commités. | P0 |
 | REQ_DATA_014 | DATA | Protection Git : le `.gitignore` racine DOIT utiliser une stratégie “Deny All / Allow Specific” (ignorer `*` par défaut et autoriser explicitement uniquement les dossiers versionnés) pour éviter la pollution accidentelle par logs/artefacts. | P0 |
 | REQ_ARCH_020 | ARCH | **The Workbench :** Operational scripts (Audit, Maintenance) MUST be stored in `workbench/scripts/`. They are distinct from `src/` but versioned. | P0 |
+| REQ_ARCH_021 | ARCH | **The Workbench Protocol :** All operational scripts (Audit, Analysis, Maintenance) generated by the AI MUST be stored in `workbench/scripts/`. These scripts are versioned stewardship assets, strictly separated from `src/` (Product). | P0 |
 | REQ_CORE_008 | CORE | Le workflow DOIT être scindé strictement en deux phases : Phase A (Définition & Spécification) et Phase B (Implémentation & Itération). | P0 |
 | REQ_CORE_009 | CORE | Phase A : l’IA agit comme Architecte/Business Analyst ; la sortie DOIT être des fichiers Markdown dans `specs/`. | P0 |
 | REQ_CORE_010 | CORE | Phase A : il est INTERDIT d’écrire du code dans `src/` ou `impl-docs/`. | P0 |
@@ -392,6 +430,7 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_AUDIT_003 | AUDIT | Un bundle de preuves (résumé, logs, diffs, erreurs) DOIT être produit à chaque exécution locale pour feedback à l’IA. | P1 |
 | REQ_CORE_016 | CORE | Sécurité d’exécution : le wrapper peut proposer des commandes/scripts, mais l’exécution réelle DOIT rester contrôlée (validation explicite). | P0 |
 | REQ_CORE_050 | Core / Security | **Safe Local Execution :** The system MUST possess a restricted interface to execute read-only system commands (e.g., directory listing, git status) to verify ground truth state. This interface MUST strictly block destructive commands (rm, mv, chmod, etc.) and sanitize inputs. | P0 |
+| REQ_CORE_055 | Core / Security | **Workbench Execution Sandbox :** The system MUST provide a `WorkbenchRunner` strictly restricted to executing scripts within `workbench/scripts/`. Execution of scripts in `src/`, `/tmp`, or other paths via this runner is FORBIDDEN. Output (stdout/stderr) MUST be captured as a text artifact. | P0 |
 | REQ_CORE_080 | CORE | **Git Tolerance :** Le système MUST tolérer les réponses Git “nothing to commit” / “working tree clean” (exit code 1 sur `git commit`), loguer un info/warning et **continuer l’exécution** (soft success), sans lever d’exception fatale. | P0 |
 | REQ_AUDIT_004 | AUDIT | Toute commande/script proposé(e) DOIT être enregistré(e) dans les artefacts. | P0 |
 | REQ_UX_003 | UX | Toute commande/script proposé(e) DOIT être accompagné(e) d’un contexte (“pourquoi”, “impact”). | P1 |
@@ -413,6 +452,8 @@ Cette section formalise un **Requirements Registry** dérivé strictement du con
 | REQ_AUDIT_030 | AUDIT | **Traceability Graph :** The system MUST ensure that every artifact produced can be traced back to the specific user prompt (Session/Step ID) and validated against its original integrity hash (Manifest) without gaps. | P0 |
 | REQ_AUDIT_031 | Audit | **External Input Echo :** Any input captured via an external editor (e.g., Nano) MUST be explicitly echoed to the console transcript and audit logs immediately upon capture. This ensures the user's intent is recorded in the history. | P0 |
 | REQ_AUDIT_060 | Audit / Security | **Transparent Tool Chain (Artifact-First Tool Execution) :** Any code generated by the AI for local execution MUST be saved as a permanent artifact (`.py`) PRIOR to execution. The execution output (`stdout/stderr`) MUST also be saved as an artifact (`.txt`). Both must be part of the session manifest. | P0 |
+| REQ_CORE_090 | Core / Protocol | **Unified Generation Protocol :** The AI MUST NOT use XML tags (e.g., `<tool_code>`) to generate tools. The AI MUST use the standard JSON protocol (`"artifacts": [...]`) to create scripts in `workbench/scripts/`. | P0 |
+| REQ_CORE_095 | Core / Protocol | **Explicit Execution Request :** Tool generation and Tool execution are DISTINCT steps. The AI cannot auto-execute a script in the same turn as its generation. Workflow: 1) Generate script (JSON) -> 2) User/System validates -> 3) Execute command. | P0 |
 | REQ_UX_005 | UX | UX attendue : commande simple “appeler l’IA” sur une entrée structurée. | P1 |
 | REQ_UX_006 | UX | UX attendue : possibilité de relancer avec resume pack. | P1 |
 | REQ_UX_007 | UX | UX attendue : sorties concises + génération d’artefacts lisibles. | P0 |
@@ -452,6 +493,7 @@ Toutes les exigences listées ci-dessus sont des reformulations directes (ou rep
   * **Injection de fichiers Ad-hoc** : REQ_UX_012 à REQ_UX_015 (+ rappel REQ_UX_016).
   * **Gestion coûts & quotas** : coûts/tokens (REQ_AUDIT_006 à REQ_AUDIT_008, REQ_AUDIT_018) et budgets/caps via policy (REQ_DATA_018).
   * **Isolation secrets & stratégie Git** : REQ_DATA_011, REQ_DATA_014, REQ_DATA_021.
+  * **Tooling / Workbench / Protocoles unifiés** : REQ_ARCH_020, REQ_ARCH_021, REQ_CORE_090, REQ_CORE_095, REQ_CORE_055, REQ_AUDIT_060.
   * **Ghost Features (Audit) désormais formalisées** :
     * **Interactive Review (GF-002)** : REQ_UX_017.
     * **Audit Ledger transactionnel (GF-001)** : REQ_DATA_025.
