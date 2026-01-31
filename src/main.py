@@ -586,17 +586,18 @@ def smart_deploy_and_commit(
     hot_deployed_files: list[Path] | None = None,
 ) -> bool:
     """Centralized Smart Deploy & Commit pipeline.
-    
+
     Logic:
     1. Copy ALL files from artifact_folder to project root (no filter).
     2. GIT ADD filter: Only add files in allowed paths (src/, specs/, impl-docs/, workbench/scripts/).
+       Additionally allow critical root files: traceability_matrix.md, project.json, README.md, .gitignore.
     3. FORCE ADD hot-deployed files from the session.
     4. Run pre-commit summary script.
     5. Ask AI for semantic commit message.
     6. Git commit.
     """
     project_root = GLOBAL_CONFIG.project_root
-    
+
     if not artifact_folder.exists():
         GLOBAL_CONSOLE.error(f"Artifact folder not found: {artifact_folder}")
         return False
@@ -604,8 +605,8 @@ def smart_deploy_and_commit(
     all_files = [p for p in artifact_folder.rglob("*") if p.is_file()]
     # Filter out internal technical artifacts for copy
     deployable_files = [
-        p for p in all_files 
-        if not p.name.endswith(".meta.json") 
+        p for p in all_files
+        if not p.name.endswith(".meta.json")
         and p.name != "raw_response_trace.jsonl"
     ]
 
@@ -622,26 +623,40 @@ def smart_deploy_and_commit(
 
     # 2. GIT ADD Filter
     files_to_commit: list[str] = []
-    
+
+    # Critical root files required by governance/workflow.
+    allowed_root_files = {
+        "traceability_matrix.md",
+        "project.json",
+        "README.md",
+        ".gitignore",
+    }
+
     # Check deployed files
     for artifact_path in deployable_files:
         rel = artifact_path.relative_to(artifact_folder)
         # Normalization for path check
         rel_str = str(rel).replace("\\", "/")
-        
-        # Allowed prefixes for tracking
-        if (
+
+        # Allowed prefixes for tracking (existing logic preserved)
+        allow = (
             rel_str.startswith("src/")
             or rel_str.startswith("specs/")
             or rel_str.startswith("impl-docs/")
             or rel_str.startswith("workbench/scripts/")
-        ):
+        )
+
+        # NEW: allow specific critical root files (exact match)
+        if rel_str in allowed_root_files:
+            allow = True
+
+        if allow:
             dest_path = project_root / rel
             try:
                 subprocess.run(
                     ["git", "add", "-f", str(dest_path)],
                     cwd=str(project_root),
-                    check=False
+                    check=False,
                 )
                 files_to_commit.append(str(dest_path))
             except Exception as e:
@@ -655,7 +670,7 @@ def smart_deploy_and_commit(
                     subprocess.run(
                         ["git", "add", "-f", str(p)],
                         cwd=str(project_root),
-                        check=False
+                        check=False,
                     )
                     files_to_commit.append(str(p))
                 except Exception:
@@ -669,7 +684,7 @@ def smart_deploy_and_commit(
     runner = WorkbenchRunner(project_root=project_root, timeout_s=30)
     summary_script = "git_pre_commit_summary.py"
     summary_output = ""
-    
+
     # Check if summary script exists
     if (project_root / "workbench/scripts" / summary_script).exists():
         rc, out, err = runner.run_script(summary_script)
@@ -680,12 +695,14 @@ def smart_deploy_and_commit(
             summary_output = "(Summary script unavailable)"
     else:
         # Fallback if script missing (bootstrapping)
-        summary_output = "git_pre_commit_summary.py not found. Files staged: " + ", ".join([str(Path(f).relative_to(project_root)) for f in files_to_commit[:5]])
+        summary_output = "git_pre_commit_summary.py not found. Files staged: " + ", ".join(
+            [str(Path(f).relative_to(project_root)) for f in files_to_commit[:5]]
+        )
 
     # 5. AI Commit Message
     system_msg = "You are a Semantic Commit Message Generator. Output ONLY the commit message (e.g. feat(scope): message)."
     user_msg = f"Instruction: {user_instruction}\n\nStaged Summary:\n{summary_output}"
-    
+
     try:
         GLOBAL_CONSOLE.print("🤖 Generating semantic commit message...")
         commit_msg_response, _ = client.send_chat_request(system_msg, user_msg)
@@ -745,7 +762,7 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
     # Track ALL artifacts generated across rebound turns (for Trinity warnings + final review)
     all_generated_files: list[str] = []
     final_step_id: str | None = None
-    
+
     # Track hot-deployed files to ensure they are committed
     hot_deployed_files: list[Path] = []
 
@@ -843,7 +860,7 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
                     if str(generated_file).endswith(target_script):
                         found_artifact_path = Path(generated_file)
                         break
-                
+
                 if found_artifact_path:
                     dest_path = GLOBAL_CONFIG.project_root / target_script
                     try:
@@ -907,9 +924,9 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
     # Final step: review/apply only if we have a final step folder and any generated files
     if final_step_id and all_generated_files:
         artifact_folder = GLOBAL_CONFIG.project_root / "artifacts" / final_step_id
-        
+
         # NOTE: We implicitly review the last folder. If multiple folders, we rely on cumulative effect or last step containing deliverables.
-        
+
         commit_message_hint = (instruction or "").strip() or f"Prompt changes ({final_step_id})"
         should_apply = review_and_apply(artifact_folder=artifact_folder, commit_message=commit_message_hint)
 
@@ -919,9 +936,9 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
                 artifact_folder=artifact_folder,
                 user_instruction=instruction,
                 client=client,
-                hot_deployed_files=hot_deployed_files
+                hot_deployed_files=hot_deployed_files,
             )
-            
+
             if success:
                 # Logging / Stats display
                 pt = int((usage_stats or {}).get("prompt_tokens", 0) or 0)
@@ -933,7 +950,7 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
                 GLOBAL_CONSOLE.print(
                     f"Estimated Cost: input=${in_cost:.6f}, output=${out_cost:.6f}, total=${total_cost:.6f}"
                 )
-                
+
                 GLOBAL_LEDGER.log_transaction(
                     session_id=session_id,
                     user_instruction=(instruction or "").strip(),
@@ -942,7 +959,7 @@ def _run_prompt_flow(tokens: list[str], client: AIClient) -> None:
                     status="success",
                 )
             else:
-                 GLOBAL_CONSOLE.error("Smart Deployment failed (see errors above).")
+                GLOBAL_CONSOLE.error("Smart Deployment failed (see errors above).")
 
         else:
             GLOBAL_CONSOLE.print("Changes were not applied.")
