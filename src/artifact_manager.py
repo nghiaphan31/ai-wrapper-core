@@ -72,14 +72,25 @@ class ArtifactManager:
         manifest_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         return manifest_path
 
-    def process_response(self, session_id: str, step_name: str, raw_text: str) -> list[str]:
+    def process_response(
+        self, 
+        session_id: str, 
+        step_name: str, 
+        raw_text: str, 
+        enable_rebound: bool = False
+    ) -> list[str] | tuple[list[str], dict | None]:
         """
         Parse la réponse IA, affiche la réflexion, et écrit les fichiers 
         EN RESPECTANT L'ARBORESCENCE (ex: artifacts/step_X/specs/doc.md).
+        
+        Args:
+            enable_rebound (bool): Si True, retourne (files, next_action). 
+                                   Si False (défaut), retourne files (compatibilité).
         """
         step_dir = self.artifacts_dir / step_name
         step_dir.mkdir(parents=True, exist_ok=True)
         generated_files = []
+        next_action = None
 
         # 1. Sauvegarde Trace
         trace_path = step_dir / "raw_response_trace.jsonl"
@@ -93,7 +104,7 @@ class ArtifactManager:
         
         if not json_objects:
             GLOBAL_CONSOLE.error("⚠️ No valid JSON block found in AI response.")
-            return []
+            return ([], None) if enable_rebound else []
 
         # 3. Traitement
         for obj in json_objects:
@@ -105,6 +116,32 @@ class ArtifactManager:
             if "message" in obj:
                 GLOBAL_CONSOLE.print(f"\n🤖 [Message]: {obj['message']}\n")
 
+            # --- NOUVEAU : Extraction Next Action (Rebound Protocol) ---
+            if "next_action" in obj:
+                cand = obj["next_action"]
+                is_valid = True
+                
+                # Check Type
+                if cand.get("type") != "exec_and_chain":
+                    GLOBAL_CONSOLE.error(f"⚠️ Invalid next_action type: {cand.get('type')}")
+                    is_valid = False
+                
+                # Check Target (Security)
+                target = cand.get("target_script", "")
+                if not target.startswith("workbench/scripts/"):
+                    GLOBAL_CONSOLE.error(f"⛔ Security: next_action target must be in workbench/scripts/ (Got: {target})")
+                    is_valid = False
+                
+                # Check Prompt
+                if not cand.get("continuation_prompt"):
+                    GLOBAL_CONSOLE.error("⚠️ Invalid next_action: missing continuation_prompt")
+                    is_valid = False
+                
+                if is_valid:
+                    next_action = cand
+                    GLOBAL_CONSOLE.print(f"⚡ [Next Action]: {target}")
+
+            # --- Traitement des Artifacts (Logic existante préservée) ---
             if "artifacts" in obj:
                 for artifact in obj["artifacts"]:
                     path_str = artifact.get("path") # ex: "specs/10_auto.md"
@@ -114,7 +151,7 @@ class ArtifactManager:
                     if not path_str or content is None:
                         continue
 
-                    # --- CORRECTION PATH MANAGEMENT ---
+                    # --- CORRECTION PATH MANAGEMENT (CONSERVÉ) ---
                     # 1. On combine le dossier step avec le chemin demandé
                     # 2. On utilise .resolve() pour gérer les ../ éventuels
                     try:
@@ -160,6 +197,10 @@ class ArtifactManager:
                     except Exception as e:
                         GLOBAL_CONSOLE.error(f"Failed to write artifact {path_str}: {e}")
 
+        # Retour conditionnel pour compatibilité
+        if enable_rebound:
+            return generated_files, next_action
+        
         return generated_files
 
     def get_session_artifacts(self) -> list[str]:
