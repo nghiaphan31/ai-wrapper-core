@@ -312,23 +312,70 @@ def _cmd_report() -> None:
     GLOBAL_CONSOLE.print(f"Ledger File: {ledger_file}")
 
 
+def _normalize_exec_script_arg(raw: str) -> str:
+    """Normalize the user-provided exec script argument.
+
+    UX goal (per user request):
+      - User should be able to type: exec hello_world.py
+      - Albert MUST only accept scripts located in workbench/scripts/.
+
+    Compatibility:
+      - If the user still types exec workbench/scripts/hello_world.py, we accept it
+        by stripping the prefix to match the runner contract.
+      - Also tolerates ./workbench/scripts/... and leading slashes are still rejected
+        by WorkbenchRunner.
+
+    Returns:
+      A path string relative to workbench/scripts/.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return s
+
+    # Normalize separators for prefix matching
+    s_norm = s.replace("\\", "/")
+
+    prefixes = [
+        "workbench/scripts/",
+        "./workbench/scripts/",
+        "./workbench/./scripts/",
+    ]
+
+    for pref in prefixes:
+        if s_norm.startswith(pref):
+            s_norm = s_norm[len(pref) :]
+            break
+
+    # Keep original style (but normalized) to avoid weird backslashes
+    return s_norm
+
+
 def _cmd_exec(tokens: list[str]) -> None:
     """Execute a workbench script via WorkbenchRunner.
 
     Usage:
       exec <script.py> [args...]
 
-    Where <script.py> is a path relative to workbench/scripts/.
+    IMPORTANT:
+      - The script MUST be located under workbench/scripts/.
+      - You should provide <script.py> as a path relative to workbench/scripts/.
+        Example: exec hello_world.py
 
     Examples:
       exec hello_world.py
       exec audits/scan_repo.py --flag value
+
+    Blocked examples:
+      exec /tmp/x.py
+      exec ../src/main.py
     """
     if len(tokens) < 2:
-        GLOBAL_CONSOLE.error("Usage: exec <script.py> [args...] (script path is relative to workbench/scripts/)")
+        GLOBAL_CONSOLE.error(
+            "Usage: exec <script.py> [args...] (script must be located in workbench/scripts/)"
+        )
         return
 
-    rel_script = tokens[1]
+    rel_script = _normalize_exec_script_arg(tokens[1])
     script_args = tokens[2:]
 
     runner = WorkbenchRunner(project_root=GLOBAL_CONFIG.project_root, timeout_s=60)
@@ -364,7 +411,7 @@ def _print_help():
         "  implement [-f file] [--scope {full,code,specs,minimal}] - Execute an implementation task based on instructions"
     )
     GLOBAL_CONSOLE.print(
-        "  exec <script.py> [args...] - Execute a workbench script from workbench/scripts/ (restricted)"
+        "  exec <script.py> [args...] - Execute a Python script located in workbench/scripts/ (restricted sandbox)"
     )
     GLOBAL_CONSOLE.print("  test_ai              - Send a minimal test request to the AI")
     GLOBAL_CONSOLE.print("  status               - Show git working tree status and last commit")
@@ -378,9 +425,14 @@ def _print_help():
     GLOBAL_CONSOLE.print("  --scope      Context scope to reduce tokens: full (default), code, specs, minimal")
 
     GLOBAL_CONSOLE.print("\nOptions for exec:")
-    GLOBAL_CONSOLE.print(
-        "  exec <script.py> [args...]  Script path relative to workbench/scripts/ (only .py allowed; timeout=60s)"
-    )
+    GLOBAL_CONSOLE.print("  exec <script.py> [args...]")
+    GLOBAL_CONSOLE.print("    - The script MUST exist under: workbench/scripts/")
+    GLOBAL_CONSOLE.print("    - Provide the path relative to workbench/scripts/ (recommended):")
+    GLOBAL_CONSOLE.print("        exec hello_world.py")
+    GLOBAL_CONSOLE.print("        exec audits/scan_repo.py --flag value")
+    GLOBAL_CONSOLE.print("    - For backward-compatibility, these are also accepted:")
+    GLOBAL_CONSOLE.print("        exec workbench/scripts/hello_world.py")
+    GLOBAL_CONSOLE.print("    - Only .py allowed; timeout=60s")
 
 
 def _extract_attached_files(tokens: list[str]) -> list[str]:

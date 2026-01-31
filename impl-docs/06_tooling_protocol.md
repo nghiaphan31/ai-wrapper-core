@@ -1,5 +1,5 @@
 # Documentation Implémentation : Tooling Protocol (Workbench Scripts + Exec)
-**Version :** 0.2.2
+**Version :** 0.2.3
 **Date :** 2026-01-31
 
 ## 1. Objectif
@@ -46,18 +46,31 @@ La génération et l’exécution sont **deux étapes distinctes** (REQ_CORE_095
 L’exécution se fait via la commande CLI interactive :
 - `exec <script.py> [args...]`
 
-**Comportement effectif (implémentation actuelle, alignée UX) :**
-- l’argument `<script.py>` est un chemin **relatif à `workbench/scripts/`** (et non plus un chemin relatif à la racine projet),
-- les arguments suivants sont passés tels quels au script.
+#### 3.2.1 Règle UX (demandée) : pas de chemin à saisir vers `workbench/scripts/`
+**Objectif UX :** l’utilisateur doit pouvoir lancer un script en tapant simplement :
+- `exec hello_world.py`
+
+Albert ne doit accepter **que** des scripts situés sous :
+- `workbench/scripts/`
+
+Donc la commande `exec` **cherche/valide uniquement** dans `workbench/scripts/`.
+
+#### 3.2.2 Forme attendue (recommandée)
+- `<script.py>` est un chemin **relatif à `workbench/scripts/`**.
 
 Exemples valides :
 - `exec hello_world.py`
 - `exec audits/scan_repo.py --flag value`
 
-Exemples invalides (bloqués) :
+#### 3.2.3 Compatibilité (tolérance)
+Pour éviter les frictions lors de la transition, Albert tolère aussi :
+- `exec workbench/scripts/hello_world.py`
+
+Dans ce cas, le wrapper normalise l’argument en retirant le préfixe `workbench/scripts/` avant validation.
+
+#### 3.2.4 Exemples invalides (bloqués)
 - `exec /tmp/x.py` (chemin absolu)
 - `exec ../src/main.py` (sort de `workbench/scripts/`)
-- `exec workbench/scripts/hello_world.py` (désormais à éviter : le préfixe `workbench/scripts/` n’est plus attendu)
 
 ### 3.3 Sandbox d’exécution (REQ_CORE_055)
 L’exécution est effectuée par `WorkbenchRunner` :
@@ -78,5 +91,5 @@ Le protocole Workbench Scripts + Exec garantit :
 - **Specs :** `specs/01_architecture_baseline.md` → REQ_AUDIT_060, REQ_CORE_055, REQ_CORE_090, REQ_CORE_095
 - **Code :**
   - `src/workbench_runner.py` (sandbox runner)
-  - `src/main.py` (commande `exec`)
+  - `src/main.py` (commande `exec` + normalisation UX)
 - **Traçabilité :** `traceability_matrix.md`
